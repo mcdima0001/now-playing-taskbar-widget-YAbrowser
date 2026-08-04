@@ -36,7 +36,14 @@ public class WidgetSettings
     /// <summary>Barra de progresso da música no fundo do widget (clique para saltar).</summary>
     public bool ShowProgress { get; set; } = true;
 
+    /// <summary>Títulos longos: true = deslizam UMA vez no início da faixa e ficam
+    /// quietos; false (padrão) = deslize contínuo. Pedido da comunidade (#14).</summary>
+    public bool ScrollTitleOnce { get; set; } = false;
+
     // Botões visíveis (em ecrãs pequenos, os menos importantes escondem-se sozinhos)
+    // ShowPlay = false transforma o widget num mostrador de "a tocar agora" sem
+    // controlos (pedido da comunidade — o play era o único que não se escondia)
+    public bool ShowPlay { get; set; } = true;
     public bool ShowPrev { get; set; } = true;
     public bool ShowNext { get; set; } = true;
     public bool ShowLike { get; set; } = true;

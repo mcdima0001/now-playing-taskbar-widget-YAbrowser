@@ -252,6 +252,7 @@
                     </MenuItem>
                 </MenuItem>
                 <MenuItem x:Name="ButtonsMenuItem" Header="Botões">
+                    <MenuItem x:Name="BtnPlayMenu" Header="Reproduzir/Pausar" IsCheckable="True" Click="Buttons_Click"/>
                     <MenuItem x:Name="BtnLikeMenu" Header="Adicionar aos favoritos (+)" IsCheckable="True" Click="Buttons_Click"/>
                     <MenuItem x:Name="BtnShuffleMenu" Header="Modo aleatório" IsCheckable="True" Click="Buttons_Click"/>
                     <MenuItem x:Name="BtnPrevMenu" Header="Anterior" IsCheckable="True" Click="Buttons_Click"/>
@@ -260,6 +261,7 @@
                     <MenuItem x:Name="BtnVolumeMenu" Header="Volume" IsCheckable="True" Click="Buttons_Click"/>
                 </MenuItem>
                 <MenuItem x:Name="ProgressMenu" Header="Barra de progresso" IsCheckable="True" Click="Progress_MenuClick"/>
+                <MenuItem x:Name="ScrollOnceMenu" Header="Deslizar título só uma vez" IsCheckable="True" Click="ScrollOnce_Click"/>
                 <MenuItem x:Name="LauncherMenu" Header="Mostrar botão para abrir o Spotify" IsCheckable="True"
                           Click="Launcher_Click"
                           ToolTip="Com o Spotify fechado, mostra um botão para o abrir em vez de esconder o widget"/>

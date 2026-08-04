@@ -175,6 +175,7 @@ public partial class MainWindow : Window
         SizeNormal.Header = L.SizeNormal;
         SizeLarge.Header = L.SizeLarge;
         ButtonsMenuItem.Header = L.ButtonsMenu;
+        BtnPlayMenu.Header = L.BtnPlay;
         BtnLikeMenu.Header = L.BtnLike;
         BtnShuffleMenu.Header = L.BtnShuffle;
         BtnPrevMenu.Header = L.BtnPrev;
@@ -182,6 +183,7 @@ public partial class MainWindow : Window
         BtnRepeatMenu.Header = L.BtnRepeat;
         BtnVolumeMenu.Header = L.BtnVolume;
         ProgressMenu.Header = L.ProgressBar;
+        ScrollOnceMenu.Header = L.ScrollTitleOnce;
         LauncherMenu.Header = L.ShowLauncher;
         LauncherMenu.ToolTip = L.ShowLauncherTip;
         AutoStartMenu.Header = L.AutoStart;
@@ -324,6 +326,8 @@ public partial class MainWindow : Window
     {
         LauncherMenu.IsChecked = _settings.ShowLauncher;
         ProgressMenu.IsChecked = _settings.ShowProgress;
+        ScrollOnceMenu.IsChecked = _settings.ScrollTitleOnce;
+        BtnPlayMenu.IsChecked = _settings.ShowPlay;
         BtnLikeMenu.IsChecked = _settings.ShowLike;
         BtnShuffleMenu.IsChecked = _settings.ShowShuffle;
         BtnPrevMenu.IsChecked = _settings.ShowPrev;
@@ -793,7 +797,9 @@ public partial class MainWindow : Window
         const double PlayBtn = 34;            // 30 + margens
         const double BasePart = 16 + 34 + 15; // padding + capa + margens do texto
 
-        double used = BasePart + PlayBtn + MinTextWidth;
+        // O play deixou de ser obrigatório: quem só quer o mostrador de "a
+        // tocar agora" pode escondê-lo (pedido da comunidade)
+        double used = BasePart + MinTextWidth + (_settings.ShowPlay ? PlayBtn : 0);
         if (avail < used)
             return false;
 
@@ -807,6 +813,7 @@ public partial class MainWindow : Window
 
         double text = Math.Max(MinTextWidth, Math.Min(MaxTextWidth, MinTextWidth + (avail - used)));
 
+        SetVis(PlayPauseButton, _settings.ShowPlay);
         SetVis(PrevButton, prev);
         SetVis(NextButton, next);
         SetVis(LikeButton, like);
@@ -1460,14 +1467,26 @@ public partial class MainWindow : Window
         if (overflow > 4)
         {
             double scrollSeconds = Math.Max(1.5, overflow / 25.0);
-            var anim = new DoubleAnimationUsingKeyFrames { RepeatBehavior = RepeatBehavior.Forever };
-            double t = 2.5; // pausa inicial
+            double end = -(overflow + 12);
+            var anim = new DoubleAnimationUsingKeyFrames();
+            double t = 2.5; // pausa inicial (ler o início)
             anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.Zero)));
             anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
             t += scrollSeconds;
-            anim.KeyFrames.Add(new LinearDoubleKeyFrame(-(overflow + 12), KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
-            t += 1.5; // pausa no fim antes de recomeçar
-            anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(-(overflow + 12), KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
+            anim.KeyFrames.Add(new LinearDoubleKeyFrame(end, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
+            t += 1.5; // pausa no fim (ler o resto)
+            anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(end, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
+            if (_settings.ScrollTitleOnce)
+            {
+                // Uma vez: regressar ao início e ficar estático (#14)
+                t += 0.6;
+                anim.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
+                // sem RepeatBehavior → corre 1x e o HoldEnd fixa em X=0
+            }
+            else
+            {
+                anim.RepeatBehavior = RepeatBehavior.Forever; // contínuo (padrão)
+            }
             anim.Duration = TimeSpan.FromSeconds(t);
             TitleShift.BeginAnimation(TranslateTransform.XProperty, anim);
         }
@@ -1521,6 +1540,14 @@ public partial class MainWindow : Window
         _settings.ShowProgress = ProgressMenu.IsChecked;
         _settings.Save();
         UpdateProgressUi();
+    }
+
+    private void ScrollOnce_Click(object sender, RoutedEventArgs e)
+    {
+        _settings.ScrollTitleOnce = ScrollOnceMenu.IsChecked;
+        _settings.Save();
+        _marqueeKey = ""; // forçar recalcular a animação com o novo modo
+        UpdateMarquee();
     }
 
     private void VolumePopup_Closed(object sender, EventArgs e)
@@ -1789,6 +1816,7 @@ public partial class MainWindow : Window
 
     private void Buttons_Click(object sender, RoutedEventArgs e)
     {
+        _settings.ShowPlay = BtnPlayMenu.IsChecked;
         _settings.ShowLike = BtnLikeMenu.IsChecked;
         _settings.ShowShuffle = BtnShuffleMenu.IsChecked;
         _settings.ShowPrev = BtnPrevMenu.IsChecked;

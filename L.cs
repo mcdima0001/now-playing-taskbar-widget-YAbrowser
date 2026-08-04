@@ -33,11 +33,13 @@ internal static class L
     public static string ButtonsMenu => Pt ? "Botões" : "Buttons";
     public static string BtnLike => Pt ? "Adicionar aos favoritos (+)" : "Add to favorites (+)";
     public static string BtnShuffle => Pt ? "Modo aleatório" : "Shuffle";
+    public static string BtnPlay => Pt ? "Reproduzir/Pausar" : "Play/Pause";
     public static string BtnPrev => Pt ? "Anterior" : "Previous";
     public static string BtnNext => Pt ? "Seguinte" : "Next";
     public static string BtnRepeat => Pt ? "Repetição" : "Repeat";
     public static string BtnVolume => Pt ? "Volume" : "Volume";
     public static string ProgressBar => Pt ? "Barra de progresso" : "Progress bar";
+    public static string ScrollTitleOnce => Pt ? "Deslizar título só uma vez" : "Scroll title only once";
     public static string ShowLauncher => Pt ? "Mostrar botão para abrir o Spotify" : "Show button to open Spotify";
     public static string ShowLauncherTip => Pt
         ? "Com o Spotify fechado, mostra um botão para o abrir em vez de esconder o widget"
