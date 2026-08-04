@@ -54,6 +54,10 @@ public partial class MainWindow : Window
     private static bool _updateCheckStarted;
     private static bool _recreatePending;
 
+    // Atualização disponível (partilhada por todas as janelas): a verificação
+    // silenciosa guarda-a aqui e cada janela realça o item do menu
+    private static (Version Version, string Url)? _pendingUpdate;
+
     /// <summary>True se existe pelo menos uma janela de widget viva.</summary>
     public static bool HasWindows => Instances.Count > 0;
 
@@ -322,6 +326,7 @@ public partial class MainWindow : Window
             _updateCheckStarted = true; // com várias janelas, só uma verifica
             _ = CheckUpdatesQuietlyAsync();
         }
+        RefreshUpdateMenu(); // se já se sabe de uma versão nova, realçar já
 
         await mediaInit;
         if (_closed)
@@ -1955,7 +1960,9 @@ public partial class MainWindow : Window
         UpdateMenu.IsEnabled = false;
         try
         {
-            var update = await UpdateService.CheckAsync();
+            // Se a verificação silenciosa já encontrou uma versão nova, usar
+            // esse resultado (ir direto ao pedido) em vez de re-verificar
+            var update = _pendingUpdate ?? await UpdateService.CheckAsync();
             if (update == null)
             {
                 MessageBox.Show(L.UpdateLatest(UpdateService.CurrentVersion), L.AppTitle);
@@ -1978,18 +1985,46 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Verificação silenciosa ao arrancar: se houver update, realça o item do menu.</summary>
+    /// <summary>Verificação silenciosa: ao arrancar e depois a cada 6 h (um
+    /// widget fica dias aberto e nunca reparava de outra forma). Se houver
+    /// versão nova, realça o item do menu em TODAS as janelas.</summary>
     private async Task CheckUpdatesQuietlyAsync()
     {
-        try
+        await Task.Delay(TimeSpan.FromSeconds(20));
+        while (!_closed)
         {
-            await Task.Delay(TimeSpan.FromSeconds(20));
-            var update = await UpdateService.CheckAsync();
-            if (update != null)
-                await Dispatcher.InvokeAsync(() =>
-                    UpdateMenu.Header = L.UpdateAvailable(update.Value.Version));
+            try
+            {
+                var update = await UpdateService.CheckAsync();
+                if (update != null)
+                {
+                    _pendingUpdate = update;
+                    await Dispatcher.InvokeAsync(RefreshAllUpdateMenus);
+                }
+            }
+            catch { }
+            await Task.Delay(TimeSpan.FromHours(6));
         }
-        catch { }
+    }
+
+    private static void RefreshAllUpdateMenus()
+    {
+        foreach (var w in Instances)
+            w.RefreshUpdateMenu();
+    }
+
+    /// <summary>Aplica o realce "nova versão" ao item do menu (verde + negrito +
+    /// ⬤) se houver uma atualização pendente. Chamado ao carregar a janela e
+    /// quando a verificação encontra uma versão nova.</summary>
+    private void RefreshUpdateMenu()
+    {
+        if (PackagedApp.IsPackaged) return; // a Store trata das atualizações
+        if (_pendingUpdate is { } u)
+        {
+            UpdateMenu.Header = L.UpdateAvailable(u.Version);
+            UpdateMenu.Foreground = new SolidColorBrush(Color.FromRgb(0x1E, 0xD7, 0x60));
+            UpdateMenu.FontWeight = FontWeights.Bold;
+        }
     }
 
     private void Exit_Click(object sender, RoutedEventArgs e)
@@ -2010,6 +2045,10 @@ public partial class MainWindow : Window
         _media.Shutdown(); // solta as subscrições WinRT que prendiam a janela
         WidgetSettings.Changed -= OnSettingsChanged;
         Instances.Remove(this);
+        // Última janela fechada (ex.: reinício do Explorer): reabrir a porta à
+        // verificação de updates, para o widget recriado voltar a verificar
+        if (Instances.Count == 0)
+            _updateCheckStarted = false;
         if (!App.IntentionalExit && !ClosedByApp && !_recreatePending)
         {
             // Explorer reiniciou e levou as janelas (são owned pelas barras):
