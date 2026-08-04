@@ -54,6 +54,9 @@ public partial class MainWindow : Window
     private static bool _updateCheckStarted;
     private static bool _recreatePending;
 
+    /// <summary>True se existe pelo menos uma janela de widget viva.</summary>
+    public static bool HasWindows => Instances.Count > 0;
+
     /// <summary>Garante uma janela por barra selecionada nas definições:
     /// cria as que faltam, fecha as que sobram.</summary>
     public static void SyncToMonitors()
@@ -65,8 +68,14 @@ public partial class MainWindow : Window
             win.Close();
         }
         foreach (int idx in wanted)
-            if (!Instances.Any(w => w.TrayIndex == idx))
-                new MainWindow { TrayIndex = idx }.Show();
+        {
+            if (Instances.Any(w => w.TrayIndex == idx)) continue;
+            // Uma janela que rebente a construir (ex.: falha de XAML/arranque
+            // específica de uma máquina) não pode derrubar as outras nem deixar
+            // a app viva sem UI — registar e seguir
+            try { new MainWindow { TrayIndex = idx }.Show(); }
+            catch (Exception ex) { Diag.Log($"Widget window failed to create (tray {idx}): {ex}"); }
+        }
         // A escolha de barra de cada janela pode ter mudado (ex.: o órfão que
         // tinha recuado para a principal tem de a largar JÁ, não daqui a 2s)
         foreach (var win in Instances)
@@ -1005,8 +1014,7 @@ public partial class MainWindow : Window
                 LikeIcon.Data = AddCircleGeo;
                 LikeIcon.Fill = DimWhite;
                 _liked = null;
-                ArtImage.Visibility = Visibility.Collapsed;
-                ArtPlaceholder.Visibility = Visibility.Visible;
+                SetAlbumArt(null);
                 _lastTrackKey = "";
                 UpdateMarquee();
                 return;
@@ -1075,23 +1083,63 @@ public partial class MainWindow : Window
                     // de faixa — não podem rebentar o refresh inteiro
                     try { art = ToBitmap(bytes); } catch { }
                 }
-                if (art != null)
-                {
-                    ArtBrush.ImageSource = art;
-                    ArtImage.Visibility = Visibility.Visible;
-                    ArtPlaceholder.Visibility = Visibility.Collapsed;
-                }
-                else
-                {
-                    ArtImage.Visibility = Visibility.Collapsed;
-                    ArtPlaceholder.Visibility = Visibility.Visible;
-                }
+                SetAlbumArt(art);
             }
         }
         finally
         {
             _refreshing = false;
         }
+    }
+
+    /// <summary>Troca a capa com um crossfade suave: a nova esbate para dentro
+    /// por cima da atual (camada de topo) e depois passa a ser a base — em vez
+    /// da troca seca, dá o toque "premium" pedido. Sem capa antes: fade simples
+    /// a partir do placeholder; sem capa nova: volta ao placeholder.</summary>
+    private void SetAlbumArt(BitmapImage? art)
+    {
+        const int FadeMs = 250;
+        if (art == null)
+        {
+            ArtImageTop.BeginAnimation(OpacityProperty, null);
+            ArtImageTop.Visibility = Visibility.Collapsed;
+            ArtImage.Visibility = Visibility.Collapsed;
+            ArtBrush.ImageSource = null;
+            ArtBrushTop.ImageSource = null;
+            ArtPlaceholder.Visibility = Visibility.Visible;
+            return;
+        }
+
+        bool hadArt = ArtImage.Visibility == Visibility.Visible && ArtBrush.ImageSource != null;
+        if (!hadArt)
+        {
+            // Vinha do placeholder: aparecer com um fade curto
+            ArtBrush.ImageSource = art;
+            ArtImage.BeginAnimation(OpacityProperty, null);
+            ArtImage.Opacity = 1;
+            ArtImage.Visibility = Visibility.Visible;
+            ArtPlaceholder.Visibility = Visibility.Collapsed;
+            ArtImage.BeginAnimation(OpacityProperty,
+                new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(FadeMs)));
+            return;
+        }
+
+        // Já havia capa: crossfade real — a nova na camada de topo a esbater
+        // para dentro por cima da atual
+        ArtImage.BeginAnimation(OpacityProperty, null);
+        ArtImage.Opacity = 1;
+        ArtBrushTop.ImageSource = art;
+        ArtImageTop.Visibility = Visibility.Visible;
+        var fade = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(FadeMs));
+        fade.Completed += (_, _) =>
+        {
+            // A de topo passa a ser a base; a de topo esconde-se p/ a próxima
+            ArtBrush.ImageSource = art;
+            ArtImageTop.BeginAnimation(OpacityProperty, null);
+            ArtImageTop.Opacity = 0;
+            ArtImageTop.Visibility = Visibility.Collapsed;
+        };
+        ArtImageTop.BeginAnimation(OpacityProperty, fade);
     }
 
     private static BitmapImage ToBitmap(byte[] bytes)

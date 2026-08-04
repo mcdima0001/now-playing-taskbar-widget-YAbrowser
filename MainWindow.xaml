@@ -303,6 +303,13 @@
                                 <ImageBrush x:Name="ArtBrush" Stretch="UniformToFill"/>
                             </Border.Background>
                         </Border>
+                        <!-- Camada de cima: a nova capa esbate para dentro por
+                             cima da atual (crossfade), depois passa a ser a base -->
+                        <Border x:Name="ArtImageTop" CornerRadius="4" Opacity="0" Visibility="Collapsed">
+                            <Border.Background>
+                                <ImageBrush x:Name="ArtBrushTop" Stretch="UniformToFill"/>
+                            </Border.Background>
+                        </Border>
                     </Grid>
                 </Border>
 
