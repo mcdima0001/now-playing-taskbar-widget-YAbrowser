@@ -43,9 +43,18 @@ a seekable progress bar.
 - **Position:** locked and automatic by default. To move it: right-click →
   *Move widget*, drag, and untick to lock it in the new spot. *Reset to
   automatic position* brings back auto alignment.
+- **Multiple monitors:** right-click → *Monitor* and tick every taskbar you
+  want a widget on — each display gets its own, with shared settings. (Needs
+  Windows' "show my taskbar on all displays" enabled for secondary monitors.)
 - **Size:** right-click → *Size* → Small / Normal / Large.
+- **Brightness:** right-click → *Brightness* — a slider from 20% to 100%, handy
+  to dim the widget on OLED or transparent taskbars. Scroll the mouse wheel
+  over it to fine-tune.
 - **Buttons:** right-click → *Buttons* to choose which controls appear —
-  favorites (+), shuffle, previous, next, repeat, volume.
+  play/pause, favorites (+), shuffle, previous, next, repeat, volume. Hide
+  play/pause to use it as a pure now-playing display.
+- **Long titles:** scroll continuously by default; right-click → *Scroll title
+  only once* to have them scroll once at the start of each track and then rest.
 - **Favorites (+):** reads and clicks Spotify's own button through the Spotify
   window's accessibility tree — shows a **green check** when the track is
   already saved, and adds it without stealing focus.
