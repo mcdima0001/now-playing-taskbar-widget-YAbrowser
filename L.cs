@@ -61,6 +61,9 @@ internal static class L
     public static string TipShuffleSmart => Pt ? "Modo aleatório inteligente ativo" : "Smart Shuffle on";
     public static string TipLikeAdd => Pt ? "Adicionar aos favoritos do Spotify" : "Add to your Spotify favorites";
     public static string TipLiked => Pt ? "Já está nos favoritos" : "Already in your favorites";
+    public static string TipLikeUnknown => Pt
+        ? "Favoritos: o Spotify só reporta o estado com a app aberta (clica para adicionar)"
+        : "Favorites: Spotify only reports this while its app is open (click to add)";
     public static string NothingPlaying => Pt ? "nada a tocar" : "nothing playing";
     public static string TipOpenSpotify => Pt ? "Abrir o Spotify" : "Open Spotify";
 

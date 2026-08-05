@@ -45,3 +45,23 @@ Make sure the Spotify **desktop app** is installed and running — the web playe
 in a browser doesn't expose them. A Spotify update can occasionally break this
 integration; if it happens, update the widget (fixes ship quickly) or open an
 issue.
+
+## The favorites (♥) checkmark doesn't always turn green
+
+This is a genuine limitation, and it's on Spotify's side — here's the honest
+explanation. There is **no public way** to reliably know whether the current
+track is saved:
+
+- **Spotify's Web API** used to allow it, but Spotify locked those endpoints
+  behind an approval that's out of reach for small apps (2026 changes).
+- So the widget reads the saved state from the Spotify desktop app's own
+  interface. But **Spotify freezes that information while its window is
+  minimized** (to save resources), so the widget can't read it reliably when
+  Spotify is in the background.
+
+Because of that, the widget follows a simple rule: **it only shows the green
+checkmark when it can actually confirm the track is saved.** When it can't
+(Spotify minimized), it stays neutral (a plain +) instead of guessing — it will
+never show you a wrong state. The checkmark shows reliably when Spotify has been
+open recently. Everything else (play/pause, track info, art, volume, progress)
+works regardless. Adding to favorites with the **+** always works.

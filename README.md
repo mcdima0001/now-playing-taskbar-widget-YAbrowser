@@ -57,7 +57,11 @@ a seekable progress bar.
   only once* to have them scroll once at the start of each track and then rest.
 - **Favorites (+):** reads and clicks Spotify's own button through the Spotify
   window's accessibility tree — shows a **green check** when the track is
-  already saved, and adds it without stealing focus.
+  already saved, and adds it without stealing focus. Note: Spotify freezes this
+  info while its window is minimized (and has locked the Web API alternative),
+  so the widget shows the green check only when it can actually confirm it —
+  otherwise it stays neutral rather than guessing. Adding with **+** always
+  works. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for the full explanation.
 - **Shuffle:** all three Spotify modes — off (gray), shuffle (green) and
   **Smart Shuffle** (green with a star). Clicking cycles through them just like
   in Spotify. Repeat also supports all three modes (off / playlist / track).

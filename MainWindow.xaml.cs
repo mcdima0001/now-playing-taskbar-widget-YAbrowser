@@ -1058,7 +1058,11 @@ public partial class MainWindow : Window
 
             LikeIcon.Data = liked == true ? CheckCircleGeo : AddCircleGeo;
             LikeIcon.Fill = liked == true ? SpotifyGreen : (liked == false ? Subdued : DimWhite);
-            LikeButton.ToolTip = liked == true ? L.TipLiked : L.TipLikeAdd;
+            // Honesto: com o Spotify minimizado não conseguimos confirmar o
+            // estado (null) — dizê-lo em vez de deixar o "+" parecer "não gostado"
+            LikeButton.ToolTip = liked == true ? L.TipLiked
+                               : liked == false ? L.TipLikeAdd
+                               : L.TipLikeUnknown;
 
             ShuffleMode mode = uiaMode;
             // A rede de segurança do SMTC atrasa-se vários segundos após um
