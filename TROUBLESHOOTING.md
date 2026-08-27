@@ -8,9 +8,14 @@ session** — the same system behind the Windows volume popup. If it's empty:
 1. **Update Spotify.** Old versions of the desktop app didn't publish to the
    Windows media session at all. Install the latest from spotify.com or the
    Microsoft Store.
-2. **Check the music is playing on this PC** — if you're casting to a phone or
+2. **Enable Spotify's media-key overlay.** In Spotify: **Settings → Display →
+   turn on "Show desktop overlay when using media keys."** On some versions
+   Spotify only publishes the current track to the Windows media session when
+   this is on, so with it off the widget shows nothing. (Thanks to the user who
+   tracked this down.)
+3. **Check the music is playing on this PC** — if you're casting to a phone or
    speaker via Spotify Connect, there's no local session to read.
-3. **Check Windows itself:** play a song and press a volume key. If the Windows
+4. **Check Windows itself:** play a song and press a volume key. If the Windows
    volume popup does *not* show the track name either, your Windows is missing
    media integration — common on Windows 11 **"N" editions** (sold in Europe).
    Fix: Settings → Apps → Optional features → *Add a feature* → install
@@ -18,16 +23,16 @@ session** — the same system behind the Windows volume popup. If it's empty:
 
 ## Antivirus / VirusTotal flags the installer
 
-See [issue #4](https://github.com/mechanicwb2-hub/spotify-taskbar-widget/issues/4):
+See [issue #4](https://github.com/mechanicwb2-hub/now-playing-taskbar-widget/issues/4):
 a couple of minor engines heuristically flag unsigned single-file .NET
 installers. All major engines report clean, the source is public, and you can
 install the Microsoft-signed build from the
-[Microsoft Store](https://apps.microsoft.com/detail/9P12TLJZG2CJ) instead.
+[Microsoft Store](https://apps.microsoft.com/detail/9p12tljzg2cj) instead.
 
 ## Smart App Control blocks the installer
 
 Windows 11's Smart App Control blocks unsigned apps with no override. Install
-from the [Microsoft Store](https://apps.microsoft.com/detail/9P12TLJZG2CJ) —
+from the [Microsoft Store](https://apps.microsoft.com/detail/9p12tljzg2cj) —
 that build is signed and certified by Microsoft.
 
 ## The widget overlaps something / sits in the wrong place
@@ -35,7 +40,7 @@ that build is signed and certified by Microsoft.
 - Right-click → **Reset to automatic position** (also resets the monitor choice).
 - To place it manually: right-click → **Move widget**, drag, untick to lock.
 - Found a layout the auto-positioning handles badly? Please
-  [open an issue](https://github.com/mechanicwb2-hub/spotify-taskbar-widget/issues)
+  [open an issue](https://github.com/mechanicwb2-hub/now-playing-taskbar-widget/issues)
   with a screenshot of your full taskbar — that's how the tricky setups get fixed.
 
 ## Favorites / Smart Shuffle / repeat state not showing
