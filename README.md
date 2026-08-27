@@ -52,6 +52,10 @@ volume. Runs on Windows 10 and Windows 11.
 - **Position:** locked and automatic by default. To move it: right-click →
   *Move widget*, drag, and untick to lock it in the new spot. *Reset to
   automatic position* brings back auto alignment.
+- **Choose the player:** right-click → *Player* to follow any player
+  automatically (default), lock the widget to Spotify only, or pin the player
+  that's currently playing, so YouTube and others don't take it over when you
+  only want Spotify.
 - **Multiple monitors:** right-click → *Monitor* and tick every taskbar you
   want a widget on — each display gets its own, with shared settings. (Needs
   Windows' "show my taskbar on all displays" enabled for secondary monitors.)
