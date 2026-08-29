@@ -17,10 +17,12 @@ namespace SpotifyTaskbarWidget;
 /// </summary>
 internal static class UpdateService
 {
+    public const bool AutoUpdateEnabled = false;
+
     // Repositório GitHub "dono/repo" das releases. Com "CHANGEME", a verificação fica desativada.
     public const string GitHubRepo = "mechanicwb2-hub/spotify-taskbar-widget";
 
-    public static bool IsConfigured => !GitHubRepo.Contains("CHANGEME");
+    public static bool IsConfigured => AutoUpdateEnabled && !GitHubRepo.Contains("CHANGEME");
 
     public static Version CurrentVersion =>
         Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0);
@@ -71,6 +73,7 @@ internal static class UpdateService
     /// perfis com acentos ("João") davam caminhos estropiados.</summary>
     public static async Task DownloadAndApplyAsync(string url)
     {
+        if (!AutoUpdateEnabled) return;
         if (_updating) return; // há um item de menu por janela — só um aplica
         _updating = true;
         try

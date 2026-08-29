@@ -102,6 +102,8 @@ public partial class MainWindow : Window
     private bool _refreshing;
     private bool _volLoading;
     private bool _spotifyPresent = true;
+
+    private bool _spotifyProc;
     private DateTime _sessionLostAt = DateTime.MinValue;
     private DateTime _trackNullSince = DateTime.MinValue;
 
@@ -159,6 +161,8 @@ public partial class MainWindow : Window
     private const double MaxTextWidth = 150;
     private const double MinTextWidth = 60;
 
+    private const double AutoMinTextWidth = 40;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -183,6 +187,13 @@ public partial class MainWindow : Window
         ResetPosMenu.Header = L.ResetAutoPos;
         MonitorMenu.Header = L.MonitorMenu;
         SizeMenuItem.Header = L.SizeMenu;
+        ArtMenu.Header = L.ShowArt;
+        AutoSizeMenu.Header = L.AutoSizeText;
+        AutoSizeMenu.ToolTip = L.AutoSizeTextTip;
+        TextPadMenuItem.Header = L.TextPadding;
+        TextPadMenuItem.ToolTip = L.TextPaddingTip;
+        FontMenuItem.Header = L.FontMenu;
+        LanguageMenuItem.Header = L.LanguageMenu;
         OpacityMenuItem.Header = L.OpacityMenu;
         SizeSmall.Header = L.SizeSmall;
         SizeNormal.Header = L.SizeNormal;
@@ -215,7 +226,9 @@ public partial class MainWindow : Window
         LikeButton.ToolTip = L.TipLikeAdd;
         LauncherPanel.ToolTip = L.TipOpenSpotify;
         LauncherText.Text = L.OpenSpotify;
-        ArtistText.Text = L.NothingPlaying;
+
+        if (!_spotifyPresent)
+            ArtistText.Text = L.NothingPlaying;
     }
 
     private bool _uiReady;
@@ -224,6 +237,8 @@ public partial class MainWindow : Window
     {
         _uiReady = true; // InitializeComponent terminou: elementos nomeados existem
         ApplyLanguage();
+        if (!UpdateService.IsConfigured)
+            UpdateMenu.Visibility = Visibility.Collapsed;
         if (PackagedApp.IsPackaged)
         {
             UpdateMenu.Visibility = Visibility.Collapsed; // a Store trata das atualizações
@@ -321,7 +336,7 @@ public partial class MainWindow : Window
 
         var mediaInit = _media.InitializeAsync();
 
-        if (!PackagedApp.IsPackaged && !_updateCheckStarted)
+        if (UpdateService.IsConfigured && !PackagedApp.IsPackaged && !_updateCheckStarted)
         {
             _updateCheckStarted = true; // com várias janelas, só uma verifica
             _ = CheckUpdatesQuietlyAsync();
@@ -341,6 +356,8 @@ public partial class MainWindow : Window
         LauncherMenu.IsChecked = _settings.ShowLauncher;
         ProgressMenu.IsChecked = _settings.ShowProgress;
         ScrollOnceMenu.IsChecked = _settings.ScrollTitleOnce;
+        AutoSizeMenu.IsChecked = _settings.AutoSizeText;
+        ArtMenu.IsChecked = _settings.ShowArt;
         BtnPlayMenu.IsChecked = _settings.ShowPlay;
         BtnLikeMenu.IsChecked = _settings.ShowLike;
         BtnShuffleMenu.IsChecked = _settings.ShowShuffle;
@@ -350,8 +367,14 @@ public partial class MainWindow : Window
         BtnVolumeMenu.IsChecked = _settings.ShowVolume;
         ApplyScale();
         UpdateSizeChecks();
+        ApplyLanguage();
+        BuildLanguageMenu();
+        ApplyArt();
+        ApplyFont();
+        BuildFontMenu();
         ApplyOpacity();
         UpdateOpacityChecks();
+        UpdateTextPadChecks();
     }
 
     private void OnSettingsChanged()
@@ -430,6 +453,8 @@ public partial class MainWindow : Window
     private IntPtr _hookedTray;
     private Interop.WinEventDelegate? _trayLocProc;
     private bool _updateQueued;
+
+    private bool _relayoutQueued;
 
     private void EnsureTrayLocationHook(IntPtr tray)
     {
@@ -602,7 +627,22 @@ public partial class MainWindow : Window
         {
             // Posição manual DESTA barra (por monitor — arrastar um widget não
             // pode arrastar os dos outros ecrãs)
-            leftPx = (int)Math.Max(r.Left + 4, Math.Min(manualX, r.Right - winWidth - 4));
+
+            int? notifyLeftManual = Interop.GetTrayNotifyLeft(tray);
+            bool haveGap = _settings.ManualGap.TryGetValue(TrayIndex, out double gap);
+            if (!haveGap && notifyLeftManual.HasValue)
+            {
+                gap = notifyLeftManual.Value - (manualX + winWidth);
+                _settings.ManualGap[TrayIndex] = gap;
+                haveGap = true;
+
+                Dispatcher.BeginInvoke(DispatcherPriority.Background,
+                    (Action)(() => _settings.Save()));
+            }
+            leftPx = haveGap && notifyLeftManual.HasValue
+                ? (int)Math.Round(notifyLeftManual.Value - gap - winWidth)
+                : (int)manualX;
+            leftPx = Math.Max(r.Left + 4, Math.Min(leftPx, r.Right - winWidth - 4));
             rightLimitPx = r.Right - 4;
         }
         else if (!IsTaskbarLeftAligned())
@@ -664,6 +704,20 @@ public partial class MainWindow : Window
                 // de transbordar para cima do relógio/ícones (issue #10)
                 _barWasHidden = false;
                 HideWidget();
+                return;
+            }
+
+            UpdateLayout();
+            if (Interop.GetWindowRect(_hwnd, out var wAfter) &&
+                wAfter.Right - wAfter.Left != winWidth &&
+                !_relayoutQueued)
+            {
+                _relayoutQueued = true;
+                Dispatcher.BeginInvoke(DispatcherPriority.Loaded, (Action)(() =>
+                {
+                    _relayoutQueued = false;
+                    UpdatePosition();
+                }));
                 return;
             }
         }
@@ -809,7 +863,7 @@ public partial class MainWindow : Window
 
         const double IconBtn = 28;            // 26 + margens
         const double PlayBtn = 34;            // 30 + margens
-        const double BasePart = 16 + 34 + 15; // padding + capa + margens do texto
+        double BasePart = 16 + 15 + (_settings.ShowArt ? 34 : 0);
 
         // O play deixou de ser obrigatório: quem só quer o mostrador de "a
         // tocar agora" pode escondê-lo (pedido da comunidade)
@@ -820,12 +874,24 @@ public partial class MainWindow : Window
         bool prev = false, next = false, like = false, shuffle = false, repeat = false, volume = false;
         Take(ref prev, _settings.ShowPrev);
         Take(ref next, _settings.ShowNext);
-        Take(ref like, _settings.ShowLike);
+        Take(ref like, _settings.ShowLike && _spotifyProc);
         Take(ref shuffle, _settings.ShowShuffle);
         Take(ref repeat, _settings.ShowRepeat);
-        Take(ref volume, _settings.ShowVolume);
+        Take(ref volume, _settings.ShowVolume && _spotifyProc);
 
-        double text = Math.Max(MinTextWidth, Math.Min(MaxTextWidth, MinTextWidth + (avail - used)));
+        double room = Math.Min(MaxTextWidth, MinTextWidth + (avail - used));
+        double text;
+        if (_settings.AutoSizeText)
+        {
+            TitleText.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            ArtistText.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            double natural = Math.Ceiling(Math.Max(TitleText.DesiredSize.Width, ArtistText.DesiredSize.Width));
+            text = Math.Min(room, Math.Max(AutoMinTextWidth, natural + _settings.TextPadding));
+        }
+        else
+        {
+            text = Math.Max(MinTextWidth, room);
+        }
 
         SetVis(PlayPauseButton, _settings.ShowPlay);
         SetVis(PrevButton, prev);
@@ -920,23 +986,20 @@ public partial class MainWindow : Window
         _refreshing = true;
         try
         {
-            bool processAlive = Process.GetProcessesByName("Spotify").Length > 0;
+            _spotifyProc = Process.GetProcessesByName("Spotify").Length > 0;
 
             // As chamadas SMTC podem ficar penduradas para sempre numa sessão em
             // teardown (Spotify a fechar/reabrir) — sem timeout, a flag _refreshing
             // ficava presa e o widget congelava até reiniciar
             TrackInfo? track = null;
-            if (processAlive)
-            {
-                try { track = await _media.GetTrackAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
-                catch (TimeoutException) { }
-            }
+            try { track = await _media.GetTrackAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (TimeoutException) { }
 
             // Nas mudanças de faixa, a sessão/título ficam vazios por umas centenas
             // de ms — manter o estado atual no ecrã e re-verificar já, em vez de
             // piscar placeholders ou esconder o widget
             bool noData = track == null || string.IsNullOrWhiteSpace(track.Title);
-            if (processAlive && noData && _lastTrackKey.Length > 0)
+            if (noData && _lastTrackKey.Length > 0)
             {
                 if (_trackNullSince == DateTime.MinValue)
                     _trackNullSince = DateTime.UtcNow;
@@ -951,16 +1014,13 @@ public partial class MainWindow : Window
                 _trackNullSince = DateTime.MinValue;
             }
 
-            // Perder a sessão com o processo ainda vivo (de forma persistente) =
-            // fecho do Spotify em curso. Esconder, sem estados intermédios.
-            if (processAlive && track == null && _lastTrackKey.Length > 0)
+            if (noData && _lastTrackKey.Length > 0)
             {
                 _sessionLostAt = DateTime.UtcNow;
                 _lastTrackKey = "";
             }
-            bool closing = processAlive && track == null &&
-                           DateTime.UtcNow - _sessionLostAt < TimeSpan.FromSeconds(6);
-            _spotifyPresent = processAlive && !closing;
+            bool closing = noData && DateTime.UtcNow - _sessionLostAt < TimeSpan.FromSeconds(6);
+            _spotifyPresent = !noData || (_spotifyProc && !closing);
 
             var launcherWanted = !_spotifyPresent && _settings.ShowLauncher
                 ? Visibility.Visible : Visibility.Collapsed;
@@ -1034,7 +1094,7 @@ public partial class MainWindow : Window
             // acessibilidade do Spotify; o SMTC serve de rede de segurança.
             string key = track.Title + "|" + track.Artist;
             bool keyChanged = key != _lastTrackKey;
-            if (keyChanged || _uiaDirty || DateTime.UtcNow - _lastUiaStateAt > TimeSpan.FromSeconds(5))
+            if (_spotifyProc && (keyChanged || _uiaDirty || DateTime.UtcNow - _lastUiaStateAt > TimeSpan.FromSeconds(5)))
             {
                 _uiaDirty = false;
                 var state = (Liked: (bool?)null, Shuffle: ShuffleMode.Unknown, Repeat: RepeatMode.Unknown, Fresh: false);
@@ -1045,7 +1105,7 @@ public partial class MainWindow : Window
                 _uiaState = (state.Fresh ? state.Liked : null, state.Shuffle, state.Repeat);
                 _lastUiaStateAt = DateTime.UtcNow;
             }
-            if (keyChanged)
+            if (_spotifyProc && keyChanged)
                 _ = SettleStateAsync(); // re-ler até o Spotify renderizar a barra da faixa nova
             var (liked, uiaMode, repeatMode) = _uiaState;
             // Depois de adicionar aos favoritos, ignorar "não gostado" antigo — o
@@ -1078,7 +1138,7 @@ public partial class MainWindow : Window
 
             ApplyShuffleVisual(mode);
 
-            if (keyChanged || _artDirty)
+            if (_settings.ShowArt && (keyChanged || _artDirty))
             {
                 _lastTrackKey = key;
                 _artDirty = false;
@@ -1503,7 +1563,7 @@ public partial class MainWindow : Window
         double clipWidth = TextStack.Width;
         // O DPI entra na chave: a largura renderizada muda com a escala do
         // monitor e a decisão de scroll ficava obsoleta ao mudar de ecrã
-        string key = $"{TitleText.Text}|{clipWidth:0}|{VisualTreeHelper.GetDpi(this).PixelsPerDip:0.##}";
+        string key = $"{TitleText.Text}|{clipWidth:0}|{VisualTreeHelper.GetDpi(this).PixelsPerDip:0.##}|{TitleText.FontFamily.Source}";
         if (key == _marqueeKey) return;
         _marqueeKey = key;
 
@@ -1752,7 +1812,18 @@ public partial class MainWindow : Window
                 // Fica bloqueado nesta posição (modo manual) SÓ nesta barra;
                 // px físicos, indexados pelo monitor desta janela
                 if (Interop.GetWindowRect(_hwnd, out var w))
+                {
                     _settings.ManualX[TrayIndex] = w.Left;
+
+                    IntPtr trayNow = GetTargetTray();
+                    int? notifyLeft = trayNow != IntPtr.Zero
+                        ? Interop.GetTrayNotifyLeft(trayNow)
+                        : null;
+                    if (notifyLeft.HasValue)
+                        _settings.ManualGap[TrayIndex] = notifyLeft.Value - w.Right;
+                    else
+                        _settings.ManualGap.Remove(TrayIndex);
+                }
                 _settings.Save();
             }
         }
@@ -1777,6 +1848,7 @@ public partial class MainWindow : Window
         // monitores fica como está (limpá-la destruía a escolha do utilizador)
         _settings.AutoPosition = true;
         _settings.ManualX.Clear();
+        _settings.ManualGap.Clear();
         _settings.Save();
         MoveMenu.IsChecked = false;
         _moveMode = false;
@@ -1794,6 +1866,220 @@ public partial class MainWindow : Window
     }
 
     private void ApplyScale() => Root.LayoutTransform = new ScaleTransform(_settings.Scale, _settings.Scale);
+
+    private FontFamily? _xamlFont;
+
+    private void ApplyArt() =>
+        ArtPanel.Visibility = _settings.ShowArt ? Visibility.Visible : Visibility.Collapsed;
+
+    private void ApplyFont()
+    {
+        _xamlFont ??= TitleText.FontFamily;
+        string name = _settings.FontFamily;
+        FontFamily font = _xamlFont;
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            try { font = new FontFamily(name); }
+            catch { font = _xamlFont; }
+        }
+        TitleText.FontFamily = font;
+        ArtistText.FontFamily = font;
+        LauncherText.FontFamily = font;
+
+        UpdateMarquee();
+    }
+
+    private static readonly string[] FontChoices =
+    {
+        "Segoe UI", "Segoe UI Variable", "Arial", "Calibri", "Cascadia Mono",
+        "Consolas", "Georgia", "Tahoma", "Times New Roman", "Verdana",
+    };
+
+    private void BuildFontMenu()
+    {
+        FontMenuItem.Items.Clear();
+
+        var installed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (var f in Fonts.SystemFontFamilies)
+                installed.Add(f.Source);
+        }
+        catch { }
+
+        var systemItem = new MenuItem
+        {
+            Header = L.FontSystem,
+            IsCheckable = true,
+            IsChecked = string.IsNullOrWhiteSpace(_settings.FontFamily),
+            Tag = "",
+        };
+        systemItem.Click += Font_Click;
+        FontMenuItem.Items.Add(systemItem);
+        FontMenuItem.Items.Add(new Separator());
+
+        foreach (string name in FontChoices)
+        {
+            if (installed.Count > 0 && !installed.Contains(name)) continue;
+            var item = new MenuItem
+            {
+                Header = name,
+                IsCheckable = true,
+                IsChecked = string.Equals(_settings.FontFamily, name, StringComparison.OrdinalIgnoreCase),
+                Tag = name,
+                FontFamily = new FontFamily(name),
+            };
+            item.Click += Font_Click;
+            FontMenuItem.Items.Add(item);
+        }
+
+        FontMenuItem.Items.Add(new Separator());
+
+        bool isCustom = !string.IsNullOrWhiteSpace(_settings.FontFamily) &&
+                        !FontChoices.Contains(_settings.FontFamily, StringComparer.OrdinalIgnoreCase);
+        var customItem = new MenuItem
+        {
+            Header = isCustom ? L.FontCustomCurrent(_settings.FontFamily) : L.FontCustom,
+            IsCheckable = true,
+            IsChecked = isCustom,
+        };
+        customItem.Click += (_, _) =>
+        {
+            customItem.IsChecked = isCustom;
+            if (Root.ContextMenu is { } menu) menu.IsOpen = false;
+            string? picked = PromptForFontName(_settings.FontFamily, installed);
+            if (picked == null) return;
+            _settings.FontFamily = picked;
+            _settings.Save();
+        };
+        FontMenuItem.Items.Add(customItem);
+    }
+
+    private string? PromptForFontName(string current, HashSet<string> installed)
+    {
+        var label = new TextBlock
+        {
+            Text = L.FontCustomLabel,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 6),
+        };
+        var box = new TextBox { Text = current, FontSize = 13, Padding = new Thickness(4, 3, 4, 3) };
+        var hint = new TextBlock
+        {
+            FontSize = 11,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 6, 0, 0),
+            Foreground = new SolidColorBrush(Color.FromRgb(0x99, 0x99, 0x99)),
+            Text = L.FontCustomClear,
+        };
+
+        void Validate()
+        {
+            string n = box.Text.Trim();
+            if (n.Length == 0)
+            {
+                box.FontFamily = new TextBox().FontFamily;
+                hint.Text = L.FontCustomClear;
+                hint.Foreground = new SolidColorBrush(Color.FromRgb(0x99, 0x99, 0x99));
+                return;
+            }
+            bool unknown = installed.Count > 0 && !installed.Contains(n);
+            try { box.FontFamily = new FontFamily(n); } catch { }
+            hint.Text = unknown ? L.FontNotInstalled : L.FontCustomClear;
+            hint.Foreground = new SolidColorBrush(unknown
+                ? Color.FromRgb(0xC8, 0x7A, 0x10)
+                : Color.FromRgb(0x99, 0x99, 0x99));
+        }
+        box.TextChanged += (_, _) => Validate();
+
+        var ok = new Button { Content = "OK", Width = 84, Height = 26, IsDefault = true, Margin = new Thickness(0, 0, 8, 0) };
+        var cancel = new Button { Content = L.Cancel, Width = 84, Height = 26, IsCancel = true };
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 14, 0, 0),
+        };
+        buttons.Children.Add(ok);
+        buttons.Children.Add(cancel);
+
+        var panel = new StackPanel { Margin = new Thickness(14) };
+        panel.Children.Add(label);
+        panel.Children.Add(box);
+        panel.Children.Add(hint);
+        panel.Children.Add(buttons);
+
+        var win = new Window
+        {
+            Title = L.FontCustomTitle,
+            Content = panel,
+            Width = 340,
+            SizeToContent = SizeToContent.Height,
+            WindowStyle = WindowStyle.ToolWindow,
+            ResizeMode = ResizeMode.NoResize,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+            ShowInTaskbar = false,
+
+            Topmost = true,
+        };
+        ok.Click += (_, _) => win.DialogResult = true;
+        win.Loaded += (_, _) => { box.Focus(); box.SelectAll(); };
+        Validate();
+
+        return win.ShowDialog() == true ? box.Text.Trim() : null;
+    }
+
+    private static readonly (string Code, string Name)[] LanguageChoices =
+    {
+        ("en", "English"),
+        ("pt", "Português"),
+        ("ru", "Русский"),
+        ("uk", "Українська"),
+    };
+
+    private void BuildLanguageMenu()
+    {
+        LanguageMenuItem.Items.Clear();
+
+        var auto = new MenuItem
+        {
+            Header = L.LanguageAuto,
+            IsCheckable = true,
+            IsChecked = string.IsNullOrWhiteSpace(_settings.Language),
+            Tag = "",
+        };
+        auto.Click += Language_Click;
+        LanguageMenuItem.Items.Add(auto);
+        LanguageMenuItem.Items.Add(new Separator());
+
+        foreach (var (code, name) in LanguageChoices)
+        {
+            var item = new MenuItem
+            {
+                Header = name,
+                IsCheckable = true,
+                IsChecked = string.Equals(_settings.Language, code, StringComparison.OrdinalIgnoreCase),
+                Tag = code,
+            };
+            item.Click += Language_Click;
+            LanguageMenuItem.Items.Add(item);
+        }
+    }
+
+    private void Language_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem item) return;
+        _settings.Language = (string)(item.Tag ?? "");
+        // O Save propaga a todas as janelas: cada uma re-aplica os textos
+        _settings.Save();
+    }
+
+    private void Font_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem item) return;
+        _settings.FontFamily = (string)(item.Tag ?? "");
+        _settings.Save();
+    }
 
     private void UpdateSizeChecks()
     {
@@ -1854,6 +2140,54 @@ public partial class MainWindow : Window
 
     private void ApplyOpacity() => Root.Opacity = _settings.Opacity;
 
+    private bool _textPadLoading;
+    private DispatcherTimer? _textPadSaveTimer;
+
+    private void TextPadSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_textPadLoading || !_uiReady) return;
+        _settings.TextPadding = Math.Clamp(e.NewValue, 0, 40);
+        TextPadValueText.Text = $"{Math.Round(e.NewValue)} px";
+
+        _marqueeKey = "";
+        UpdatePosition();
+        _textPadSaveTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _textPadSaveTimer.Stop();
+        _textPadSaveTimer.Tick -= TextPadSaveTick;
+        _textPadSaveTimer.Tick += TextPadSaveTick;
+        _textPadSaveTimer.Start();
+    }
+
+    private void TextPadSaveTick(object? sender, EventArgs e)
+    {
+        _textPadSaveTimer?.Stop();
+        _settings.Save();
+    }
+
+    private int _textPadWheelAccum;
+
+    private void TextPad_MouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        e.Handled = true;
+        if (_textPadWheelAccum != 0 && Math.Sign(_textPadWheelAccum) != Math.Sign(e.Delta))
+            _textPadWheelAccum = 0;
+        _textPadWheelAccum += e.Delta;
+        int steps = _textPadWheelAccum / 120;
+        if (steps == 0) return;
+        _textPadWheelAccum -= steps * 120;
+        TextPadSlider.Value = Math.Clamp(TextPadSlider.Value + 2 * steps, 0, 40);
+    }
+
+    private void UpdateTextPadChecks()
+    {
+        _textPadLoading = true;
+        TextPadSlider.Value = Math.Round(_settings.TextPadding);
+        TextPadValueText.Text = $"{Math.Round(_settings.TextPadding)} px";
+        _textPadLoading = false;
+
+        TextPadMenuItem.IsEnabled = _settings.AutoSizeText;
+    }
+
     private void UpdateOpacityChecks()
     {
         // Refletir o valor guardado no slider sem redisparar o Save
@@ -1861,6 +2195,25 @@ public partial class MainWindow : Window
         OpacitySlider.Value = Math.Round(_settings.Opacity * 100);
         OpacityValueText.Text = $"{Math.Round(_settings.Opacity * 100)}%";
         _opacityLoading = false;
+    }
+
+    private void Art_Click(object sender, RoutedEventArgs e)
+    {
+        _settings.ShowArt = ArtMenu.IsChecked;
+        _settings.Save();
+
+        _artDirty = true;
+        _ = RefreshTrackAsync();
+        UpdatePosition();
+    }
+
+    private void AutoSize_Click(object sender, RoutedEventArgs e)
+    {
+        _settings.AutoSizeText = AutoSizeMenu.IsChecked;
+        _settings.Save();
+
+        _marqueeKey = "";
+        UpdatePosition();
     }
 
     private void Launcher_Click(object sender, RoutedEventArgs e)

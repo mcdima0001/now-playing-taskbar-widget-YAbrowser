@@ -234,6 +234,8 @@
                     <MenuItem x:Name="SizeNormal" Header="Normal" IsCheckable="True" Click="Size_Click" Tag="1.0"/>
                     <MenuItem x:Name="SizeLarge" Header="Grande" IsCheckable="True" Click="Size_Click" Tag="1.1"/>
                 </MenuItem>
+                <MenuItem x:Name="FontMenuItem" Header="Tipo de letra"/>
+                <MenuItem x:Name="LanguageMenuItem" Header="Idioma"/>
                 <MenuItem x:Name="OpacityMenuItem" Header="Brilho" StaysOpenOnClick="True">
                     <!-- Slider contínuo (pedido da comunidade OLED); mínimo de 20%
                          para o widget nunca ficar invisível e inalcançável -->
@@ -260,8 +262,26 @@
                     <MenuItem x:Name="BtnRepeatMenu" Header="Repetição" IsCheckable="True" Click="Buttons_Click"/>
                     <MenuItem x:Name="BtnVolumeMenu" Header="Volume" IsCheckable="True" Click="Buttons_Click"/>
                 </MenuItem>
+                <MenuItem x:Name="ArtMenu" Header="Mostrar capa" IsCheckable="True" Click="Art_Click"/>
                 <MenuItem x:Name="ProgressMenu" Header="Barra de progresso" IsCheckable="True" Click="Progress_MenuClick"/>
                 <MenuItem x:Name="ScrollOnceMenu" Header="Deslizar título só uma vez" IsCheckable="True" Click="ScrollOnce_Click"/>
+                <MenuItem x:Name="AutoSizeMenu" Header="Largura ajustada ao texto" IsCheckable="True" Click="AutoSize_Click"/>
+
+                <MenuItem x:Name="TextPadMenuItem" Header="Espaço depois do texto" StaysOpenOnClick="True">
+                    <MenuItem x:Name="TextPadSliderItem" StaysOpenOnClick="True">
+                        <MenuItem.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <Slider x:Name="TextPadSlider" Style="{StaticResource SpotifySlider}" Width="110"
+                                        Minimum="0" Maximum="40" SmallChange="2" LargeChange="5"
+                                        IsMoveToPointEnabled="True" VerticalAlignment="Center"
+                                        ValueChanged="TextPadSlider_ValueChanged"
+                                        MouseWheel="TextPad_MouseWheel"/>
+                                <TextBlock x:Name="TextPadValueText" Text="0 px" Foreground="White"
+                                           Margin="8,0,0,0" Width="36" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </MenuItem.Header>
+                    </MenuItem>
+                </MenuItem>
                 <MenuItem x:Name="LauncherMenu" Header="Mostrar botão para abrir o Spotify" IsCheckable="True"
                           Click="Launcher_Click"
                           ToolTip="Com o Spotify fechado, mostra um botão para o abrir em vez de esconder o widget"/>
@@ -271,6 +291,9 @@
                 <MenuItem x:Name="DonateMenu" Header="Apoiar o projeto ☕" Click="Donate_Click" Visibility="Collapsed"/>
                 <MenuItem x:Name="UpdateMenu" Header="Procurar atualizações" Click="Update_Click"/>
                 <Separator/>
+                <MenuItem x:Name="ForkMenu" Header="Fork by Abraham (Priler)"
+                          Foreground="#8B8B8B" FontSize="11"
+                          IsHitTestVisible="False" Focusable="False"/>
                 <MenuItem x:Name="ExitMenu" Header="Sair" Click="Exit_Click"/>
             </ContextMenu>
         </Border.ContextMenu>
@@ -293,7 +316,7 @@
             <StackPanel x:Name="ContentPanel" Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center">
 
                 <!-- Capa do álbum -->
-                <Border Width="34" Height="34" CornerRadius="4" Background="#22FFFFFF" VerticalAlignment="Center">
+                <Border x:Name="ArtPanel" Width="34" Height="34" CornerRadius="4" Background="#22FFFFFF" VerticalAlignment="Center">
                     <Grid>
                         <TextBlock x:Name="ArtPlaceholder" Text="&#xE93C;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
                                    FontSize="14" Foreground="#88FFFFFF"

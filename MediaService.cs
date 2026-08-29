@@ -79,26 +79,24 @@ public sealed class MediaService
     {
         if (_manager == null) return;
 
-        // Apenas sessões do Spotify — sem fallback para outras apps (Chrome, etc.),
-        // senão o widget mostra media de outros programas quando o Spotify fecha.
         GlobalSystemMediaTransportControlsSession? chosen = null;
         try
         {
             var sessions = _manager.GetSessions();
             chosen = sessions.FirstOrDefault(s =>
                 (s.SourceAppUserModelId ?? "").Contains("spotify", StringComparison.OrdinalIgnoreCase));
-            // Há sessões mas nenhuma é do Spotify: só é anómalo se o Spotify
-            // estiver mesmo a correr (Chrome/YouTube com o Spotify fechado é o
-            // dia-a-dia normal — registá-lo enchia o log de falsos erros)
-            if (chosen == null && sessions.Count > 0)
+            if (chosen == null)
             {
-                var procs = System.Diagnostics.Process.GetProcessesByName("Spotify");
-                bool spotifyRunning = procs.Length > 0;
-                foreach (var p in procs) p.Dispose();
-                if (spotifyRunning)
-                    Diag.Once("no-spotify-session",
-                        "Media sessions present but none matches Spotify: " +
-                        string.Join(", ", sessions.Select(x => x.SourceAppUserModelId ?? "(null)")));
+                try { chosen = _manager.GetCurrentSession(); } catch { }
+                chosen ??= sessions.FirstOrDefault(s =>
+                {
+                    try
+                    {
+                        return s.GetPlaybackInfo()?.PlaybackStatus ==
+                               GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+                    }
+                    catch { return false; }
+                }) ?? sessions.FirstOrDefault();
             }
         }
         catch (Exception ex)

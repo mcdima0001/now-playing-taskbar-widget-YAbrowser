@@ -16,6 +16,10 @@ public class WidgetSettings
     /// propósito: arrastar um widget não pode mexer nos dos outros ecrãs.</summary>
     public Dictionary<int, double> ManualX { get; set; } = new();
 
+    public Dictionary<int, double> ManualGap { get; set; } = new();
+
+    public string FontFamily { get; set; } = "";
+
     /// <summary>Escala do widget (0.8 = pequeno, 1.0 = normal, 1.1 = grande).</summary>
     public double Scale { get; set; } = 1.0;
 
@@ -32,6 +36,14 @@ public class WidgetSettings
 
     /// <summary>Com o Spotify fechado: true mostra um botão "Abrir Spotify"; false esconde o widget.</summary>
     public bool ShowLauncher { get; set; } = false;
+
+    public string Language { get; set; } = "";
+
+    public double TextPadding { get; set; } = 0;
+
+    public bool ShowArt { get; set; } = true;
+
+    public bool AutoSizeText { get; set; } = false;
 
     /// <summary>Barra de progresso da música no fundo do widget (clique para saltar).</summary>
     public bool ShowProgress { get; set; } = true;
@@ -76,6 +88,7 @@ public class WidgetSettings
             // impedir o arranque (ficava um processo invisível para sempre)
             if (s.Monitors is null) s.Monitors = new List<int>();
             if (s.ManualX is null) s.ManualX = new Dictionary<int, double>();
+            if (s.ManualGap is null) s.ManualGap = new Dictionary<int, double>();
         }
         catch
         {
@@ -89,6 +102,7 @@ public class WidgetSettings
         // Nunca abaixo de 20%: um settings estragado com Opacity=0 tornava o
         // widget invisível e sem forma de clicar para o recuperar
         s.Opacity = Math.Clamp(s.Opacity, 0.2, 1.0);
+        s.TextPadding = Math.Clamp(s.TextPadding, 0, 40);
         return s;
     }
 
