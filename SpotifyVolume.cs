@@ -4,8 +4,8 @@ using System.Runtime.InteropServices;
 namespace SpotifyTaskbarWidget;
 
 /// <summary>
-/// Controla o volume das sessões de áudio do Spotify (não o volume do sistema),
-/// via CoreAudio — o mesmo que aparece no Misturador de Volume do Windows.
+/// Controls the volume of Spotify's audio sessions (not the system volume),
+/// through CoreAudio - the same thing the Windows Volume Mixer shows.
 /// </summary>
 internal static class SpotifyVolume
 {
@@ -95,7 +95,7 @@ internal static class SpotifyVolume
         [PreserveSig] int GetSession(int sessionCount, out IAudioSessionControl2 session);
     }
 
-    // Vtable completa (IAudioSessionControl + IAudioSessionControl2), declarada plana
+    // Full vtable (IAudioSessionControl + IAudioSessionControl2), declared flat
     [ComImport, Guid("BFB7FF88-7239-4FC9-8FA2-07C950BE9C6D"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IAudioSessionControl2
     {

@@ -3,17 +3,17 @@ using System.Windows.Automation;
 namespace SpotifyTaskbarWidget;
 
 /// <summary>
-/// Localiza, via UI Automation, os elementos da barra de tarefas que servem
-/// de âncora ao widget: o botão de widgets/tempo (limite esquerdo) e o botão
-/// Iniciar (limite direito). Os valores vêm em píxeis físicos de ecrã.
+/// Locates, through UI Automation, the taskbar elements that anchor the
+/// widget: the widgets/weather button (left limit) and the Start button
+/// (right limit). Values come back in physical screen pixels.
 /// </summary>
 internal static class TaskbarAnchors
 {
-    /// <summary>Ok=false significa que a LEITURA falhou (UIA lançou exceção) —
-    /// as âncoras anteriores continuam válidas. Ok=true com um valor null
-    /// significa que o elemento não existe mesmo (ex.: widgets desativados).
-    /// Sem esta distinção, uma falha transitória era tratada como "botão
-    /// desapareceu" e o widget aterrava em cima do botão do tempo.</summary>
+    /// <summary>Ok=false means the READ failed (UIA threw) - the previous
+    /// anchors stay valid. Ok=true with a null value means the element really
+    /// does not exist (e.g. widgets turned off). Without this distinction a
+    /// transient failure was treated as "the button disappeared" and the
+    /// widget landed on top of the weather button.</summary>
     public static (bool Ok, double? widgetsRight, double? startLeft, double? taskButtonsRight) Get(IntPtr tray)
     {
         double? widgetsRight = null, startLeft = null, taskButtonsRight = null;
@@ -37,15 +37,15 @@ internal static class TaskbarAnchors
                 if (!r.IsEmpty) startLeft = r.Left;
             }
 
-            // Fim da fila de ícones das apps (para não os tapar quando o widget
-            // ancora à direita, em barras alinhadas à esquerda / secundárias)
+            // End of the app icon row (so they are not covered when the widget
+            // anchors right, on left-aligned / secondary taskbars)
             var buttons = root.FindAll(TreeScope.Descendants,
                 new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
             foreach (AutomationElement button in buttons)
             {
-                // Um botão pode morrer a MEIO da enumeração (apps a abrir/fechar);
-                // sem o try por botão, o rebentar aqui descartava a leitura toda
-                // — incluindo as âncoras já lidas com sucesso acima
+                // A button can die MID-enumeration (apps opening/closing);
+                // without the per-button try, throwing here discarded the whole
+                // read - including the anchors already read successfully above
                 try
                 {
                     string cls = button.Current.ClassName ?? "";

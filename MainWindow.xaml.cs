@@ -18,16 +18,16 @@ public partial class MainWindow : Window
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunValueName = "SpotifyTaskbarWidget";
 
-    // Link de donativos; vazio = item de menu oculto
+    // Donation link; empty = the menu item stays hidden
     private const string DonateUrl = "https://ko-fi.com/mechanicwb2";
 
-    // Ícones do Spotify (paths 16x16 do leitor web)
+    // Spotify icons (16x16 paths from the web player)
     private static readonly Geometry PlayGeo = Geometry.Parse("M3 1.713a.7.7 0 0 1 1.05-.607l10.89 6.288a.7.7 0 0 1 0 1.212L4.05 14.894A.7.7 0 0 1 3 14.288V1.713z");
     private static readonly Geometry PauseGeo = Geometry.Parse("M2.7 1a.7.7 0 0 0-.7.7v12.6a.7.7 0 0 0 .7.7h2.6a.7.7 0 0 0 .7-.7V1.7a.7.7 0 0 0-.7-.7H2.7zm8 0a.7.7 0 0 0-.7.7v12.6a.7.7 0 0 0 .7.7h2.6a.7.7 0 0 0 .7-.7V1.7a.7.7 0 0 0-.7-.7h-2.6z");
     private static readonly Geometry AddCircleGeo = Geometry.Parse("M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8z M11.75 8a.75.75 0 0 1-.75.75H8.75V11a.75.75 0 0 1-1.5 0V8.75H5a.75.75 0 0 1 0-1.5h2.25V5a.75.75 0 0 1 1.5 0v2.25H11a.75.75 0 0 1 .75.75z");
     private static readonly Geometry CheckCircleGeo = Geometry.Parse("M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm11.748-1.97a.75.75 0 0 0-1.06-1.06l-4.47 4.44-1.405-1.406a.75.75 0 1 0-1.061 1.06l2.466 2.467 5.53-5.5z");
 
-    // Cores do Spotify; as neutras dependem do tema da barra (claro/escuro)
+    // Spotify colours; the neutral ones depend on the bar theme (light/dark)
     private static readonly Brush SpotifyGreen = new SolidColorBrush(Color.FromRgb(0x1E, 0xD7, 0x60));
     private Brush Subdued = new SolidColorBrush(Color.FromRgb(0xB3, 0xB3, 0xB3));
     private Brush DimWhite = new SolidColorBrush(Color.FromArgb(0x66, 0xFF, 0xFF, 0xFF));
@@ -39,11 +39,11 @@ public partial class MainWindow : Window
     private readonly WidgetSettings _settings = WidgetSettings.Shared;
     private bool? _liked;
 
-    /// <summary>Barra desta janela (0 = principal, 1+ = secundárias). Cada
-    /// monitor selecionado nas definições tem a sua própria instância.</summary>
+    /// <summary>This window's taskbar (0 = primary, 1+ = secondary). Every
+    /// monitor selected in the settings has its own instance.</summary>
     public int TrayIndex { get; set; }
 
-    /// <summary>Fecho programático (sincronização de monitores) — não recriar.</summary>
+    /// <summary>Programmatic close (monitor sync) - do not recreate.</summary>
     internal bool ClosedByApp;
 
     private bool _closed;
@@ -54,15 +54,15 @@ public partial class MainWindow : Window
     private static bool _updateCheckStarted;
     private static bool _recreatePending;
 
-    // Atualização disponível (partilhada por todas as janelas): a verificação
-    // silenciosa guarda-a aqui e cada janela realça o item do menu
+    // Update available (shared by every window): the silent check stores it
+    // here and each window highlights its own menu item
     private static (Version Version, string Url)? _pendingUpdate;
 
-    /// <summary>True se existe pelo menos uma janela de widget viva.</summary>
+    /// <summary>True if at least one widget window is alive.</summary>
     public static bool HasWindows => Instances.Count > 0;
 
-    /// <summary>Garante uma janela por barra selecionada nas definições:
-    /// cria as que faltam, fecha as que sobram.</summary>
+    /// <summary>Guarantees one window per taskbar selected in the settings:
+    /// creates the missing ones, closes the extra ones.</summary>
     public static void SyncToMonitors()
     {
         var wanted = WidgetSettings.Shared.Monitors;
@@ -74,14 +74,14 @@ public partial class MainWindow : Window
         foreach (int idx in wanted)
         {
             if (Instances.Any(w => w.TrayIndex == idx)) continue;
-            // Uma janela que rebente a construir (ex.: falha de XAML/arranque
-            // específica de uma máquina) não pode derrubar as outras nem deixar
-            // a app viva sem UI — registar e seguir
+            // A window that throws while constructing (e.g. a XAML/startup
+            // failure specific to one machine) must not take the others down
+            // nor leave the app alive with no UI - log it and carry on
             try { new MainWindow { TrayIndex = idx }.Show(); }
             catch (Exception ex) { Diag.Log($"Widget window failed to create (tray {idx}): {ex}"); }
         }
-        // A escolha de barra de cada janela pode ter mudado (ex.: o órfão que
-        // tinha recuado para a principal tem de a largar JÁ, não daqui a 2s)
+        // Each window's taskbar choice may have changed (e.g. the orphan that
+        // fell back to the primary has to let it go NOW, not in 2s)
         foreach (var win in Instances)
             win._trayCache = IntPtr.Zero;
     }
@@ -103,25 +103,26 @@ public partial class MainWindow : Window
     private bool _volLoading;
     private bool _spotifyPresent = true;
 
+    /// <summary>Spotify process alive - only its extras depend on this.</summary>
     private bool _spotifyProc;
     private DateTime _sessionLostAt = DateTime.MinValue;
     private DateTime _trackNullSince = DateTime.MinValue;
 
-    // Progresso: última posição conhecida + instante em que foi lida (interpolação)
+    // Progress: last known position + the instant it was read (interpolation)
     private TimeSpan _duration;
     private TimeSpan _basePosition;
     private DateTime _basePositionAt;
     private bool _isPlayingUi;
 
-    // Estado via acessibilidade (favorito/aleatório/repetição): caro de ler,
-    // por isso só em mudanças de faixa, após cliques, ou a cada 5 s
+    // State through accessibility (favorite/shuffle/repeat): expensive to read,
+    // so only on track changes, after clicks, or every 5s
     private (bool? Liked, ShuffleMode Shuffle, RepeatMode Repeat) _uiaState =
         (null, ShuffleMode.Unknown, RepeatMode.Unknown);
     private DateTime _lastUiaStateAt = DateTime.MinValue;
     private bool _uiaDirty = true;
 
-    // Depois de um clique otimista, leituras antigas (pré-clique) chegam durante
-    // ~2 s e contradizem o novo estado — são ignoradas nesse intervalo
+    // After an optimistic click, old reads (pre-click) keep arriving for ~2s
+    // and contradict the new state - they are ignored during that window
     private DateTime _playToggledAt = DateTime.MinValue;
     private DateTime _likedOptimisticAt = DateTime.MinValue;
     private DateTime _shuffleToggledAt = DateTime.MinValue;
@@ -130,10 +131,10 @@ public partial class MainWindow : Window
     private bool AcceptPlayingState(bool incoming) =>
         incoming == _isPlayingUi || DateTime.UtcNow - _playToggledAt > TimeSpan.FromSeconds(2);
 
-    // Âncoras da barra (píxeis físicos), atualizadas em background via UI Automation
-    // Hook de foreground: o delegate tem de ficar referenciado (senão o GC apanha-o)
-    // Um só hook de foreground para o processo inteiro: com N janelas, N hooks
-    // davam N callbacks e N pipelines completos por CADA mudança de foco no OS
+    // Taskbar anchors (physical pixels), refreshed in the background through UI Automation
+    // Foreground hook: the delegate has to stay referenced (or the GC takes it)
+    // A single foreground hook for the whole process: with N windows, N hooks
+    // meant N callbacks and N full pipelines for EVERY focus change in the OS
     private static Interop.WinEventDelegate? _fgProc;
     private static IntPtr _fgHook;
 
@@ -161,6 +162,7 @@ public partial class MainWindow : Window
     private const double MaxTextWidth = 150;
     private const double MinTextWidth = 60;
 
+    /// <summary>Floor of the text column in fit-to-text mode.</summary>
     private const double AutoMinTextWidth = 40;
 
     public MainWindow()
@@ -174,12 +176,12 @@ public partial class MainWindow : Window
     {
         base.OnSourceInitialized(e);
         _hwnd = new WindowInteropHelper(this).Handle;
-        // Não roubar o foco ao clicar e não aparecer no Alt+Tab
+        // Do not steal focus on click and do not show up in Alt+Tab
         int ex = Interop.GetWindowLong(_hwnd, Interop.GWL_EXSTYLE);
         Interop.SetWindowLong(_hwnd, Interop.GWL_EXSTYLE, ex | Interop.WS_EX_TOOLWINDOW | Interop.WS_EX_NOACTIVATE);
     }
 
-    /// <summary>Aplica os textos no idioma do Windows (PT ou EN).</summary>
+    /// <summary>Applies the strings in the selected language.</summary>
     private void ApplyLanguage()
     {
         MoveMenu.Header = L.MoveWidget;
@@ -226,7 +228,8 @@ public partial class MainWindow : Window
         LikeButton.ToolTip = L.TipLikeAdd;
         LauncherPanel.ToolTip = L.TipOpenSpotify;
         LauncherText.Text = L.OpenSpotify;
-
+        // Placeholder only - with music playing the artist is on screen and
+        // rewriting it here wiped it until the next refresh
         if (!_spotifyPresent)
             ArtistText.Text = L.NothingPlaying;
     }
@@ -235,13 +238,13 @@ public partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        _uiReady = true; // InitializeComponent terminou: elementos nomeados existem
+        _uiReady = true; // InitializeComponent finished: named elements exist
         ApplyLanguage();
         if (!UpdateService.IsConfigured)
-            UpdateMenu.Visibility = Visibility.Collapsed;
+            UpdateMenu.Visibility = Visibility.Collapsed; // updates disabled in this build
         if (PackagedApp.IsPackaged)
         {
-            UpdateMenu.Visibility = Visibility.Collapsed; // a Store trata das atualizações
+            UpdateMenu.Visibility = Visibility.Collapsed; // the Store handles updates
             _ = InitStartupTaskStateAsync();
         }
         else
@@ -251,16 +254,16 @@ public partial class MainWindow : Window
         ApplyThemeIfChanged();
         RebuildMonitorMenu();
         ApplySettingsUi();
-        // As definições são partilhadas: quando outra janela grava, re-aplicar
+        // The settings are shared: when another window saves, re-apply them
         WidgetSettings.Changed += OnSettingsChanged;
 
-        // Captura de rato roubada a meio de um arrasto (menu, overlay do
-        // sistema): sem isto _dragging ficava presa e o widget deixava de se
-        // reposicionar; o próximo clique ainda gravava uma posição fantasma
+        // Mouse capture stolen mid-drag (menu, system overlay): without this
+        // _dragging stayed stuck and the widget stopped repositioning; the next
+        // click still saved a phantom position
         Root.LostMouseCapture += (_, _) =>
         {
-            // Só quando roubada a MEIO do arrasto — no largar normal o
-            // _dragging já está falso e a gravação da posição segue intacta
+            // Only when stolen MID-drag - on a normal release _dragging is
+            // already false and saving the position goes through intact
             if (_dragging)
             {
                 _dragging = false;
@@ -268,15 +271,15 @@ public partial class MainWindow : Window
             }
         };
 
-        // Re-afirmar o topmost por cima de um tooltip aberto empurra-o para
-        // trás da barra (report da comunidade) — suspender enquanto durar
+        // Re-asserting topmost over an open tooltip pushes it behind the bar
+        // (community report) - suspend it while one is up
         AddHandler(ToolTipService.ToolTipOpeningEvent,
             new ToolTipEventHandler((_, _) => _tooltipOpen = true), true);
         AddHandler(ToolTipService.ToolTipClosingEvent,
             new ToolTipEventHandler((_, _) => _tooltipOpen = false), true);
 
-        // O popup do volume tem de ganhar à barra (que também é topmost com a
-        // ocultação automática): re-afirmá-lo no instante em que abre
+        // The volume popup has to beat the bar (which is topmost too under
+        // auto-hide): re-assert it the instant it opens
         VolumePopup.Opened += (_, _) =>
         {
             _wheelAccum = 0;
@@ -284,10 +287,10 @@ public partial class MainWindow : Window
                 PresentationSource.FromVisual(VolumePopup.Child) is HwndSource src)
                 Interop.EnsureTopmost(src.Handle);
 
-            // Aberto via roda, o rato pode nunca ENTRAR no popup — o MouseLeave
-            // nunca dispararia e ele ficava aberto para sempre (suprimindo o
-            // ReassertTopmost). Watchdog: fechar quando o rato não está nem no
-            // popup nem no botão.
+            // Opened by the wheel, the mouse may never ENTER the popup - MouseLeave
+            // would never fire and it stayed open forever (suppressing
+            // ReassertTopmost). Watchdog: close it when the mouse is neither in
+            // the popup nor on the button.
             _volPopupWatchdog?.Stop();
             _volPopupWatchdog = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(800) };
             _volPopupWatchdog.Tick += (_, _) =>
@@ -311,16 +314,16 @@ public partial class MainWindow : Window
         };
         _positionTimer.Start();
 
-        // Clicar na taskbar põe a barra por cima do widget; re-afirmar o topmost
-        // no instante da mudança de janela ativa (o timer sozinho deixava flicker)
+        // Clicking the taskbar puts the bar over the widget; re-assert topmost
+        // the instant the active window changes (the timer alone left flicker)
         EnsureForegroundHook();
         Closed += (_, _) =>
         {
             if (_trayLocHook != IntPtr.Zero) Interop.UnhookWinEvent(_trayLocHook);
         };
 
-        // Subscrever ANTES de aguardar a inicialização: com o retry do SMTC, o
-        // init pode demorar minutos — o widget tem de reagir logo que ele pegue
+        // Subscribe BEFORE awaiting initialization: with the SMTC retry, init
+        // can take minutes - the widget has to react as soon as it catches
         _mediaChanged = () =>
         {
             _artDirty = true;
@@ -338,19 +341,19 @@ public partial class MainWindow : Window
 
         if (UpdateService.IsConfigured && !PackagedApp.IsPackaged && !_updateCheckStarted)
         {
-            _updateCheckStarted = true; // com várias janelas, só uma verifica
+            _updateCheckStarted = true; // with several windows, only one checks
             _ = CheckUpdatesQuietlyAsync();
         }
-        RefreshUpdateMenu(); // se já se sabe de uma versão nova, realçar já
+        RefreshUpdateMenu(); // if a new version is already known, highlight it now
 
         await mediaInit;
         if (_closed)
-            return; // fechada durante o await (sync de monitores / restart do Explorer)
+            return; // closed during the await (monitor sync / Explorer restart)
         await RefreshTrackAsync();
     }
 
-    /// <summary>Estado da UI que espelha as definições partilhadas (menus,
-    /// escala) — chamado no arranque e sempre que qualquer janela grava.</summary>
+    /// <summary>UI state mirroring the shared settings (menus, scale) - called
+    /// at startup and whenever any window saves.</summary>
     private void ApplySettingsUi()
     {
         LauncherMenu.IsChecked = _settings.ShowLauncher;
@@ -380,21 +383,21 @@ public partial class MainWindow : Window
     private void OnSettingsChanged()
     {
         ApplySettingsUi();
-        // Reposicionar só DEPOIS do layout assentar: mudar tamanho/escala e
-        // medir a janela no mesmo instante usava as dimensões antigas e o
-        // widget aterrava desalinhado até ao tick seguinte
+        // Reposition only AFTER the layout settles: changing size/scale and
+        // measuring the window in the same instant used the old dimensions and
+        // the widget landed misaligned until the next tick
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, (Action)UpdatePosition);
         _ = RefreshTrackAsync();
     }
 
-    // ---------- Posicionamento na barra de tarefas ----------
+    // ---------- Positioning on the taskbar ----------
 
     private IntPtr _trayCache;
     private DateTime _trayCacheAt;
 
-    /// <summary>Cache curta do handle da barra: enumerar e ordenar as barras
-    /// todas em CADA evento de posição (dezenas/s durante um deslize) era
-    /// trabalho repetido para rederivar um handle que quase nunca muda.</summary>
+    /// <summary>Short cache of the bar handle: enumerating and ordering every
+    /// bar on EVERY position event (dozens/s during a slide) was repeated work
+    /// to re-derive a handle that almost never changes.</summary>
     private IntPtr GetTargetTray()
     {
         if (_trayCache != IntPtr.Zero && Interop.IsWindow(_trayCache)
@@ -405,11 +408,11 @@ public partial class MainWindow : Window
         return _trayCache;
     }
 
-    /// <summary>Barra de tarefas desta janela (principal ou secundária). Se a
-    /// barra alvo não existir (monitor desligado), UMA janela órfã — a de menor
-    /// índice — recua para a barra principal, desde que nenhuma outra lá viva;
-    /// as restantes escondem-se. Garante que a app nunca fica toda invisível
-    /// (sem widget não há menu de contexto para recuperar).</summary>
+    /// <summary>This window's taskbar (primary or secondary). If the target bar
+    /// does not exist (monitor turned off), ONE orphan window - the lowest index
+    /// - falls back to the primary bar, as long as no other window lives there;
+    /// the rest hide. Guarantees the app never goes fully invisible (with no
+    /// widget there is no context menu to recover from).</summary>
     private IntPtr ResolveTargetTray()
     {
         if (TrayIndex > 0)
@@ -417,9 +420,9 @@ public partial class MainWindow : Window
             var secondaries = Interop.GetSecondaryTrays();
             if (TrayIndex <= secondaries.Count)
                 return secondaries[TrayIndex - 1];
-            // O recuo só serve para a app não ficar TODA invisível: se outra
-            // janela ainda tem barra (principal ou secundária viva), ou há um
-            // órfão de índice menor que recua primeiro, esta esconde-se
+            // The fallback exists only so the app is not ENTIRELY invisible: if
+            // another window still has a bar (primary or a live secondary), or a
+            // lower-index orphan falls back first, this one hides
             bool someoneVisible = Instances.Any(w => w != this &&
                 (w.TrayIndex == 0 || w.TrayIndex <= secondaries.Count));
             bool lowerOrphan = Instances.Any(w => w != this &&
@@ -447,13 +450,15 @@ public partial class MainWindow : Window
     private IntPtr _ownerTray;
     private DateTime _anchorsMissingSince = DateTime.MinValue;
 
-    // Hook de movimento da barra: quando ela desliza (ocultação automática),
-    // os eventos chegam ao milissegundo e o widget "cavalga" a animação
+    // Taskbar movement hook: when it slides (auto-hide) the events arrive by
+    // the millisecond and the widget "rides" the animation
     private IntPtr _trayLocHook;
     private IntPtr _hookedTray;
     private Interop.WinEventDelegate? _trayLocProc;
     private bool _updateQueued;
 
+    /// <summary>A reposition is already queued because of a width change -
+    /// stops a cascade of passes on every tick.</summary>
     private bool _relayoutQueued;
 
     private void EnsureTrayLocationHook(IntPtr tray)
@@ -470,7 +475,7 @@ public partial class MainWindow : Window
         {
             if (hwnd != _hookedTray || idObject != 0 || _updateQueued) return;
             _updateQueued = true;
-            // Prioridade alta: cada ms conta para apanhar o início do deslize
+            // High priority: every ms counts to catch the start of the slide
             Dispatcher.BeginInvoke(DispatcherPriority.Send, (Action)UpdatePosition);
         };
         _trayLocHook = Interop.SetWinEventHook(
@@ -482,14 +487,14 @@ public partial class MainWindow : Window
     {
         _updateQueued = false;
         if (_closed)
-            return; // dispatch em atraso numa janela fechada: sem isto podia
-                    // re-registar hooks num hwnd morto (crash em callback GC'd)
+            return; // a late dispatch on a closed window: without this it could
+                    // re-register hooks on a dead hwnd (crash in a GC'd callback)
         IntPtr tray = GetTargetTray();
         if (tray == IntPtr.Zero || !Interop.GetWindowRect(tray, out var r))
         {
-            // Barra alvo indisponível (monitor desligado / Explorer a reiniciar):
-            // esconder e limpar o estado de deslize — sem isto, a reaparição
-            // tocava uma animação de subida espúria
+            // Target bar unavailable (monitor off / Explorer restarting): hide
+            // and clear the slide state - without this, reappearing played a
+            // spurious rise animation
             CancelRide();
             _barWasHidden = false;
             HideWidget();
@@ -498,9 +503,9 @@ public partial class MainWindow : Window
 
         EnsureTrayLocationHook(tray);
 
-        // Janela "owned" pela taskbar: o gestor de janelas mantém-na SEMPRE acima
-        // do dono — elimina o flicker de z-order por construção. Se o Explorer
-        // reiniciar, a janela morre com a barra e o OnClosed recria o widget.
+        // Window "owned" by the taskbar: the window manager keeps it ALWAYS above
+        // its owner - kills the z-order flicker by construction. If Explorer
+        // restarts, the window dies with the bar and OnClosed recreates the widget.
         if (tray != _ownerTray && _hwnd != IntPtr.Zero)
         {
             Interop.SetWindowLongPtr(_hwnd, Interop.GWLP_HWNDPARENT, tray);
@@ -508,10 +513,10 @@ public partial class MainWindow : Window
             ReassertTopmost();
         }
 
-        // Ocultação automática: o widget "cavalga" a barra — o hook de movimento
-        // chama isto a cada frame da animação e o Y segue o rect atual, por isso
-        // ele desce e sobe colado à barra. Só se esconde quando ela assenta fora
-        // do ecrã; âncoras ficam intactas (o X não muda num deslize vertical).
+        // Auto-hide: the widget "rides" the bar - the movement hook calls this on
+        // every frame of the animation and Y follows the current rect, so it goes
+        // down and up glued to the bar. It only hides once the bar settles off
+        // screen; anchors stay intact (X does not change in a vertical slide).
         int trayHeightPx = r.Bottom - r.Top;
         int visiblePx = Interop.GetTaskbarVisiblePx(r, out int monitorBottomPx, out int workAreaBottomPx);
 
@@ -520,23 +525,23 @@ public partial class MainWindow : Window
         int winWidth = w.Right - w.Left;
         int winHeight = w.Bottom - w.Top;
 
-        // Centrar na banda DESENHADA da barra, não no rect da janela dela (no
-        // 25H2 o rect é mais alto e o widget flutuava — issue #9). A reserva de
-        // área de trabalho dá a altura real desenhada em qualquer barra
-        // (incluindo multi-linha); com ocultação automática não há reserva e
-        // vale a heurística dos 48 DIP do Win11.
+        // Centre on the DRAWN band of the bar, not on its window rect (on 25H2
+        // the rect is taller and the widget floated - issue #9). The work area
+        // reservation gives the real drawn height for any bar (multi-row
+        // included); with auto-hide there is no reservation and the Win11 48 DIP
+        // heuristic applies.
         int reservedPx = monitorBottomPx - workAreaBottomPx;
         int barBandPx = reservedPx > 8
             ? Math.Min(trayHeightPx, reservedPx)
             : Math.Min(trayHeightPx, (int)Math.Round(48 * Interop.GetDpiForWindow(tray) / 96.0));
-        // Onde o widget "estaria" com a barra assente fora do ecrã (mesmo offset
-        // vertical dentro dela): ponto de partida da subida e destino da descida
+        // Where the widget "would be" with the bar settled off screen (same
+        // vertical offset inside it): start of the rise and target of the fall
         int belowEdgeTopPx = monitorBottomPx - 2 + (barBandPx - winHeight) / 2;
 
         if (_rideAnimating)
         {
-            // A animação é dona da posição; se a barra inverter a meio,
-            // invertemos também, a partir de onde o widget está
+            // The animation owns the position; if the bar reverses halfway,
+            // we reverse too, starting from where the widget is
             if (_rideDown && visiblePx >= trayHeightPx - 4)
             {
                 CancelRide();
@@ -552,14 +557,14 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Fração do caminho de esconder que a barra já percorreu — o widget
-        // entra na animação neste ponto para ficar em sincronia com ela
+        // Fraction of the hide path the bar has already covered - the widget
+        // enters the animation at that point to stay in sync with it
         double hiddenPhase = 1.0 - Math.Clamp((double)visiblePx / trayHeightPx, 0, 1);
 
-        // Interação em curso "pina" o widget: esconder a meio de um arrasto do
-        // slider/menu fechava-lhe o popup nas mãos (e um arrasto de move-mode
-        // escondido perdia a captura do rato e ficava _dragging preso). Quando
-        // a interação acabar, o tick seguinte esconde normalmente.
+        // An interaction in progress "pins" the widget: hiding mid-drag of the
+        // slider/menu closed the popup in the user's hands (and a hidden
+        // move-mode drag lost mouse capture and left _dragging stuck). Once the
+        // interaction ends, the next tick hides normally.
         bool pinned = _dragging || VolumePopup.IsOpen ||
                       (Root.ContextMenu?.IsOpen ?? false);
 
@@ -567,8 +572,8 @@ public partial class MainWindow : Window
         {
             if (pinned)
                 return;
-            // Assente fora do ecrã. Se o widget ainda está à vista, o esconder
-            // aconteceu num salto único — animar a descida na mesma.
+            // Settled off screen. If the widget is still visible, the hide
+            // happened in a single jump - animate the fall anyway.
             if (Visibility == Visibility.Visible && Interop.IsAutoHideEnabled())
             {
                 StartRide(w.Left, w.Top, belowEdgeTopPx, down: true, winWidth, winHeight, monitorBottomPx, hiddenPhase);
@@ -581,10 +586,9 @@ public partial class MainWindow : Window
 
         if (visiblePx < trayHeightPx - 4)
         {
-            // A deslizar. Widget visível = a barra começou a esconder-se: animar
-            // a nossa descida (seguir os passos grossos da janela dela ficava
-            // aos solavancos). Invisível = revelação em curso: esperar que
-            // assente — a subida anima nessa altura.
+            // Sliding. Widget visible = the bar started hiding: animate our fall
+            // (following its coarse window steps was jerky). Invisible = a reveal
+            // is under way: wait for it to settle - the rise animates then.
             if (Visibility == Visibility.Visible && !pinned && Interop.IsAutoHideEnabled())
                 StartRide(w.Left, w.Top, belowEdgeTopPx, down: true, winWidth, winHeight, monitorBottomPx, hiddenPhase);
             return;
@@ -592,7 +596,7 @@ public partial class MainWindow : Window
 
         if (tray != _anchorsTray)
         {
-            // Mudou a barra alvo (outro monitor): descartar âncoras da anterior
+            // Target bar changed (another monitor): drop the previous anchors
             _anchorsTray = tray;
             _lastAnchorQuery = DateTime.MinValue;
             lock (_anchorLock)
@@ -602,7 +606,7 @@ public partial class MainWindow : Window
                 _taskEndPx = null;
             }
         }
-        // Daqui para baixo a barra está assente no ecrã — âncoras fiáveis
+        // From here down the bar is settled on screen - anchors are reliable
         RefreshAnchors(tray);
         double? widgetsRightPx, startLeftPx, taskEndPx;
         lock (_anchorLock)
@@ -612,11 +616,11 @@ public partial class MainWindow : Window
             taskEndPx = _taskEndPx;
         }
 
-        // Toda a matemática de posicionamento é feita em PÍXEIS FÍSICOS da barra
-        // alvo: converter para DIP usava a escala do monitor ATUAL da janela e,
-        // ao mudar para um monitor com DPI diferente, a conta saía errada e o
-        // widget aterrava a meio do ecrã.
-        double windowScale = Interop.GetDpiForWindow(_hwnd) / 96.0; // px por DIP, no monitor atual
+        // All positioning maths run in PHYSICAL PIXELS of the target bar:
+        // converting to DIP used the scale of the window's CURRENT monitor and,
+        // moving to a monitor with a different DPI, the sum came out wrong and
+        // the widget landed in the middle of the screen.
+        double windowScale = Interop.GetDpiForWindow(_hwnd) / 96.0; // px per DIP, on the current monitor
 
         int topPx = r.Bottom - barBandPx + (barBandPx - winHeight) / 2;
 
@@ -625,17 +629,21 @@ public partial class MainWindow : Window
         int leftPx, rightLimitPx;
         if (_settings.ManualX.TryGetValue(TrayIndex, out double manualX))
         {
-            // Posição manual DESTA barra (por monitor — arrastar um widget não
-            // pode arrastar os dos outros ecrãs)
-
+            // Manual position for THIS bar (per monitor - dragging one widget
+            // must not drag the ones on other screens). Stored as a DISTANCE to
+            // the tray, not as an absolute X: when it grows (a new icon, a wider
+            // clock) or shrinks, the widget follows instead of staying put and
+            // ending up covered.
             int? notifyLeftManual = Interop.GetTrayNotifyLeft(tray);
             bool haveGap = _settings.ManualGap.TryGetValue(TrayIndex, out double gap);
             if (!haveGap && notifyLeftManual.HasValue)
             {
+                // Migrating an old position (X only): convert it once
                 gap = notifyLeftManual.Value - (manualX + winWidth);
                 _settings.ManualGap[TrayIndex] = gap;
                 haveGap = true;
-
+                // Save OUTSIDE the positioning path: Save fires
+                // Changed -> ApplySettingsUi -> UpdatePosition (re-entry)
                 Dispatcher.BeginInvoke(DispatcherPriority.Background,
                     (Action)(() => _settings.Save()));
             }
@@ -647,20 +655,20 @@ public partial class MainWindow : Window
         }
         else if (!IsTaskbarLeftAligned())
         {
-            // Numa barra centrada o botão Iniciar existe sempre — âncora nula
-            // significa que a leitura ainda não chegou ou falhou.
+            // On a centred bar the Start button always exists - a null anchor
+            // means the read has not arrived yet or failed.
             if (!startLeftPx.HasValue && Visibility == Visibility.Visible)
             {
-                // Já estamos bem posicionados: FICAR QUIETO até as âncoras
-                // voltarem — esconder e reaparecer na borda esquerda (por cima
-                // do botão do tempo) era exatamente o salto reportado
+            // Already well positioned: STAY PUT until the anchors come back -
+            // hiding and reappearing at the left edge (over the weather button)
+            // was exactly the jump that was reported
                 leftPx = w.Left;
                 rightLimitPx = r.Right - 4;
             }
             else if (!startLeftPx.HasValue)
             {
-                // Ainda sem posição (arranque / primeiro reveal): esperar em
-                // vez de posicionar às cegas; após o limite, fallback à esquerda
+                // Still without a position (startup / first reveal): wait instead
+                // of positioning blind; past the limit, fall back to the left
                 if (_anchorsMissingSince == DateTime.MinValue)
                     _anchorsMissingSince = DateTime.UtcNow;
                 if (DateTime.UtcNow - _anchorsMissingSince < TimeSpan.FromSeconds(4))
@@ -674,18 +682,18 @@ public partial class MainWindow : Window
             else
             {
                 _anchorsMissingSince = DateTime.MinValue;
-                // Ícones centrados (em qualquer barra/monitor): o espaço livre
-                // está à esquerda — alinhar a seguir ao botão de widgets/tempo;
-                // sem ele, à borda esquerda. Nunca invadir o botão Iniciar.
+                // Centred icons (on any bar/monitor): the free space is on the
+                // left - align right after the widgets/weather button; without
+                // it, at the left edge. Never invade the Start button.
                 leftPx = widgetsRightPx.HasValue ? (int)widgetsRightPx.Value + 8 : r.Left + 12;
                 rightLimitPx = (int)startLeftPx.Value - 8;
             }
         }
         else
         {
-            // Ícones alinhados à esquerda: o espaço vazio está à direita —
-            // encostar antes dos ícones do sistema/relógio, sem nunca tapar
-            // a fila de ícones das apps
+            // Left-aligned icons: the empty space is on the right - tuck in
+            // before the system icons/clock, without ever covering the row of
+            // app icons
             rightAnchored = true;
             int? notifyLeftPx = Interop.GetTrayNotifyLeft(tray);
             rightLimitPx = notifyLeftPx ?? (r.Right - 220);
@@ -700,13 +708,20 @@ public partial class MainWindow : Window
             int availPx = rightAnchored ? rightLimitPx - rightAnchorLeftLimitPx : rightLimitPx - leftPx;
             if (!ApplyResponsiveLayout(availPx / windowScale))
             {
-                // Numa barra lotada nem a versão mínima cabe: esconder em vez
-                // de transbordar para cima do relógio/ícones (issue #10)
+                // On a crowded bar not even the minimum version fits: hide
+                // instead of overflowing onto the clock/icons (issue #10)
                 _barWasHidden = false;
                 HideWidget();
                 return;
             }
 
+            // The widget width changes with the title (fit-to-text) and with the
+            // buttons that fit, but the layout only settles on the NEXT pass:
+            // positioning now would use the PREVIOUS track's width and the
+            // buttons ended up shifted until the next tick (visible on every
+            // track change). Apply the layout now and, if the width changed,
+            // repeat the positioning with the right value - the anchor is the
+            // right edge, so a wrong width shifts everything.
             UpdateLayout();
             if (Interop.GetWindowRect(_hwnd, out var wAfter) &&
                 wAfter.Right - wAfter.Left != winWidth &&
@@ -722,9 +737,9 @@ public partial class MainWindow : Window
             }
         }
 
-        // Esconder quando: app em ecrã inteiro (irrelevante com auto-hide — as
-        // janelas maximizadas ocupam o ecrã todo e dariam falsos positivos; a
-        // visibilidade já segue a da barra); ou Spotify fechado sem botão de abrir.
+        // Hide when: the app is fullscreen (irrelevant under auto-hide - maximized
+        // windows cover the whole screen and would give false positives; visibility
+        // already follows the bar); or Spotify closed with no launcher button.
         bool hide = (!Interop.IsAutoHideEnabled() && Interop.IsForegroundFullscreen(_hwnd, tray))
                     || (!_spotifyPresent && !_settings.ShowLauncher);
         if (hide)
@@ -734,11 +749,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Revelação da barra: o Windows teleporta a janela dela para o destino
-        // e anima só o visual — não há frames para seguir. Animamos nós a
-        // subida, a emergir da borda do ecrã em sincronia com a barra.
-        // (Só faz sentido com ocultação automática — sem ela, um rect
-        // transitório degenerado da barra armava uma subida espúria.)
+        // Bar reveal: Windows teleports its window to the destination and animates
+        // only the visuals - there are no frames to follow. We animate the rise
+        // ourselves, emerging from the screen edge in sync with the bar.
+        // (Only meaningful with auto-hide - without it, a transient degenerate
+        // bar rect triggered a spurious rise.)
         if (_barWasHidden && !_dragging && Interop.IsAutoHideEnabled())
         {
             _barWasHidden = false;
@@ -750,8 +765,8 @@ public partial class MainWindow : Window
         if (!_dragging && (Math.Abs(w.Left - leftPx) > 1 || Math.Abs(w.Top - topPx) > 1))
             Interop.MoveWindowTo(_hwnd, leftPx, topPx);
 
-        // Durante o deslize, recortar a parte do widget que já saiu do ecrã —
-        // sem isto, o excedente aparecia a atravessar um monitor disposto abaixo
+        // While sliding, clip the part of the widget that already left the screen -
+        // without this, the excess showed up crossing a monitor arranged below
         Interop.ClipWindowBottom(_hwnd, winWidth, winHeight, monitorBottomPx - topPx);
 
         if (Visibility != Visibility.Visible)
@@ -761,9 +776,9 @@ public partial class MainWindow : Window
 
     private bool _tooltipOpen;
 
-    /// <summary>Esconde o widget e fecha SEMPRE o popup de volume e o menu de
-    /// contexto — todos os caminhos de esconder passam por aqui para não
-    /// divergirem (havia caminhos que deixavam popups órfãos a flutuar).</summary>
+    /// <summary>Hides the widget and ALWAYS closes the volume popup and the
+    /// context menu - every hide path goes through here so they cannot diverge
+    /// (some paths used to leave orphan popups floating).</summary>
     private void HideWidget()
     {
         VolumePopup.IsOpen = false;
@@ -773,35 +788,35 @@ public partial class MainWindow : Window
             Visibility = Visibility.Hidden;
     }
 
-    /// <summary>Re-afirma o widget no topo, EXCETO com um tooltip/popup nosso
-    /// aberto — re-afirmar por cima deles empurra-os para trás da barra (que
-    /// em ocultação automática também vive na banda topmost).</summary>
+    /// <summary>Re-asserts the widget on top, EXCEPT while one of our tooltips/
+    /// popups is open - re-asserting over them pushes them behind the bar (which
+    /// under auto-hide also lives in the topmost band).</summary>
     private void ReassertTopmost()
     {
         if (!_tooltipOpen && !VolumePopup.IsOpen)
             Interop.EnsureTopmost(_hwnd);
     }
 
-    // ---------- Animação de deslize (ocultação automática da barra) ----------
+    // ---------- Slide animation (taskbar auto-hide) ----------
 
     private bool _barWasHidden;
     private bool _rideAnimating;
     private bool _rideDown;
     private DispatcherTimer? _rideTimer;
 
-    /// <summary>Anima o widget entre a posição assente e o fundo do ecrã (nos
-    /// dois sentidos), com o recorte a fazê-lo emergir/submergir na borda.
-    /// Movimento Fluent: entradas desaceleram, saídas aceleram.
-    /// startPhase (0..1): fração do caminho que a barra JÁ percorreu quando o
-    /// gatilho chegou — o primeiro passo da janela dela vem atrasado, e entrar
-    /// na curva a meio mantém o widget em sincronia em vez de a trás dela.</summary>
+    /// <summary>Animates the widget between the settled position and the bottom
+    /// of the screen (both ways), with the clip making it emerge/submerge at the
+    /// edge. Fluent motion: entrances decelerate, exits accelerate.
+    /// startPhase (0..1): fraction of the path the bar has ALREADY covered when
+    /// the trigger arrived - its window's first step comes late, and entering the
+    /// curve halfway keeps the widget in sync instead of trailing it.</summary>
     private void StartRide(int leftPx, int fromTopPx, int toTopPx, bool down,
         int winWidth, int winHeight, int monitorBottomPx, double startPhase = 0)
     {
         var sw = Stopwatch.StartNew();
-        const double DurationMs = 220; // aproxima a animação da própria barra
+        const double DurationMs = 220; // approximates the bar's own animation
         startPhase = Math.Clamp(startPhase, 0, 1);
-        // Instante da curva cujo easing corresponde à fase pedida
+        // Point on the curve whose easing matches the requested phase
         double t0 = down ? Math.Cbrt(startPhase) : 1 - Math.Cbrt(1 - startPhase);
         double t0Ms = t0 * DurationMs;
 
@@ -851,22 +866,23 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Encaixa o widget no espaço disponível: primeiro encolhe o texto até um
-    /// mínimo; se mesmo assim não couber, esconde os botões menos importantes
-    /// (volume → aleatório → favoritos → seguinte → anterior).
-    /// Devolve false quando nem a versão mínima cabe no espaço dado.
+    /// Fits the widget into the available space: first shrinks the text down to a
+    /// minimum; if it still does not fit, hides the least important buttons
+    /// (volume -> shuffle -> favorites -> next -> previous).
+    /// Returns false when not even the minimum version fits the given space.
     /// </summary>
     private bool ApplyResponsiveLayout(double availableDip)
     {
         double s = _settings.Scale;
-        double avail = availableDip / s; // trabalhar em unidades pré-escala
+        double avail = availableDip / s; // work in pre-scale units
 
-        const double IconBtn = 28;            // 26 + margens
-        const double PlayBtn = 34;            // 30 + margens
+        const double IconBtn = 28;            // 26 + margins
+        const double PlayBtn = 34;            // 30 + margins
+        // padding + cover (only when visible) + text margins
         double BasePart = 16 + 15 + (_settings.ShowArt ? 34 : 0);
 
-        // O play deixou de ser obrigatório: quem só quer o mostrador de "a
-        // tocar agora" pode escondê-lo (pedido da comunidade)
+        // Play stopped being mandatory: someone who only wants the "now playing"
+        // display can hide it (community request)
         double used = BasePart + MinTextWidth + (_settings.ShowPlay ? PlayBtn : 0);
         if (avail < used)
             return false;
@@ -874,18 +890,25 @@ public partial class MainWindow : Window
         bool prev = false, next = false, like = false, shuffle = false, repeat = false, volume = false;
         Take(ref prev, _settings.ShowPrev);
         Take(ref next, _settings.ShowNext);
-        Take(ref like, _settings.ShowLike && _spotifyProc);
+        Take(ref like, _settings.ShowLike && _spotifyProc);   // favorites: Spotify only
         Take(ref shuffle, _settings.ShowShuffle);
         Take(ref repeat, _settings.ShowRepeat);
-        Take(ref volume, _settings.ShowVolume && _spotifyProc);
+        Take(ref volume, _settings.ShowVolume && _spotifyProc); // internal volume: Spotify only
 
+        // Maximum space the text column can take on this bar
         double room = Math.Min(MaxTextWidth, MinTextWidth + (avail - used));
         double text;
         if (_settings.AutoSizeText)
         {
+            // NATURAL width of the text, measured unconstrained (same technique as
+            // the marquee: the layout no longer constrains them in this measure).
+            // The column shrinks to what title/artist need, instead of stretching
+            // and leaving a gap before the buttons.
             TitleText.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             ArtistText.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             double natural = Math.Ceiling(Math.Max(TitleText.DesiredSize.Width, ArtistText.DesiredSize.Width));
+            // The minimum stops the widget bouncing on two-letter titles;
+            // room always wins, so it never overflows a full bar
             text = Math.Min(room, Math.Max(AutoMinTextWidth, natural + _settings.TextPadding));
         }
         else
@@ -924,8 +947,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Atualiza as âncoras da barra (botão de widgets e botão Iniciar) em background,
-    /// no máximo a cada 5 segundos — as consultas de UI Automation não são gratuitas.
+    /// Refreshes the bar anchors (widgets button and Start button) in the
+    /// background, at most every 5 seconds - UI Automation queries are not free.
     /// </summary>
     private int _startMissingReads;
 
@@ -933,8 +956,8 @@ public partial class MainWindow : Window
     {
         if ((DateTime.UtcNow - _lastAnchorQuery).TotalSeconds < 5)
             return;
-        // Watchdog: se uma query pendurou (UIA contra um Explorer moribundo), a
-        // flag não pode prender as âncoras para sempre — após 15s arranca outra
+        // Watchdog: if a query hung (UIA against a dying Explorer), the flag
+        // must not hold the anchors forever - after 15s start another one
         if (_anchorQueryRunning && (DateTime.UtcNow - _lastAnchorQuery).TotalSeconds < 15)
             return;
 
@@ -947,25 +970,25 @@ public partial class MainWindow : Window
                 var (ok, widgetsRight, startLeft, taskButtonsRight) = TaskbarAnchors.Get(tray);
                 lock (_anchorLock)
                 {
-                    // A barra alvo mudou enquanto a query corria: estes valores
-                    // são coordenadas do monitor errado — deitar fora
+                    // The target bar changed while the query ran: these values
+                    // are coordinates of the wrong monitor - throw them away
                     if (tray != _anchorsTray)
                         return;
-                    // Leitura falhada → mantêm-se TODAS as âncoras anteriores
-                    // (falha transitória de UIA ≠ layout da barra mudou; era
-                    // isto que punha o widget em cima do botão do tempo)
+                    // Failed read -> ALL previous anchors are kept (a transient
+                    // UIA failure != the bar layout changed; this was what put
+                    // the widget on top of the weather button)
                     if (!ok)
                         return;
-                    // O Iniciar existe sempre — uma leitura OK sem ele é suspeita;
-                    // mas aceitar à 3ª seguida, senão um Iniciar realmente
-                    // escondido (shells modificadas) congelava as âncoras todas
+                    // Start always exists - an OK read without it is suspicious;
+                    // but accept it on the 3rd in a row, otherwise a genuinely
+                    // hidden Start (modified shells) froze every anchor
                     if (!startLeft.HasValue && _startLeftPx.HasValue && ++_startMissingReads < 3)
                         return;
                     bool startVanished = !startLeft.HasValue && _startLeftPx.HasValue;
                     _startMissingReads = 0;
-                    // Se o Iniciar sumiu (estado anómalo da shell), as outras
-                    // âncoras nulas provavelmente só falharam JUNTAS — manter as
-                    // antigas; com leitura completa, null = desativado mesmo
+                    // If Start vanished (abnormal shell state), the other null
+                    // anchors probably just failed TOGETHER - keep the old ones;
+                    // with a complete read, null really means disabled
                     _widgetsRightPx = startVanished ? (widgetsRight ?? _widgetsRightPx) : widgetsRight;
                     _taskEndPx = startVanished ? (taskButtonsRight ?? _taskEndPx) : taskButtonsRight;
                     _startLeftPx = startLeft;
@@ -978,7 +1001,7 @@ public partial class MainWindow : Window
         });
     }
 
-    // ---------- Atualização da faixa ----------
+    // ---------- Track refresh ----------
 
     private async Task RefreshTrackAsync()
     {
@@ -986,18 +1009,21 @@ public partial class MainWindow : Window
         _refreshing = true;
         try
         {
+            // Any player that publishes to SMTC (YouTube in a browser, Apple
+            // Music, ...). The Spotify process no longer decides whether the
+            // widget exists - it only tells whether its extras make sense.
             _spotifyProc = Process.GetProcessesByName("Spotify").Length > 0;
 
-            // As chamadas SMTC podem ficar penduradas para sempre numa sessão em
-            // teardown (Spotify a fechar/reabrir) — sem timeout, a flag _refreshing
-            // ficava presa e o widget congelava até reiniciar
+            // SMTC calls can hang forever on a session in teardown (player
+            // closing/reopening) - without a timeout the _refreshing flag stayed
+            // stuck and the widget froze until a restart
             TrackInfo? track = null;
             try { track = await _media.GetTrackAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
             catch (TimeoutException) { }
 
-            // Nas mudanças de faixa, a sessão/título ficam vazios por umas centenas
-            // de ms — manter o estado atual no ecrã e re-verificar já, em vez de
-            // piscar placeholders ou esconder o widget
+            // On track changes the session/title go empty for a few hundred ms -
+            // keep the current state on screen and re-check right away, instead
+            // of flashing placeholders or hiding the widget
             bool noData = track == null || string.IsNullOrWhiteSpace(track.Title);
             if (noData && _lastTrackKey.Length > 0)
             {
@@ -1014,12 +1040,17 @@ public partial class MainWindow : Window
                 _trackNullSince = DateTime.MinValue;
             }
 
+            // Losing the session persistently = the player is closing.
+            // Hide, with no intermediate states.
             if (noData && _lastTrackKey.Length > 0)
             {
                 _sessionLostAt = DateTime.UtcNow;
                 _lastTrackKey = "";
             }
             bool closing = noData && DateTime.UtcNow - _sessionLostAt < TimeSpan.FromSeconds(6);
+            // With Spotify open the old behaviour stays (shows "nothing playing");
+            // without it, the widget only exists while there really is a session -
+            // otherwise an empty rectangle sat glued to the bar.
             _spotifyPresent = !noData || (_spotifyProc && !closing);
 
             var launcherWanted = !_spotifyPresent && _settings.ShowLauncher
@@ -1034,19 +1065,19 @@ public partial class MainWindow : Window
                 _duration = TimeSpan.Zero;
                 VolumePopup.IsOpen = false;
                 UpdateProgressUi();
-                UpdatePosition(); // esconder/mostrar imediatamente, sem esperar o timer
+                UpdatePosition(); // hide/show immediately, without waiting for the timer
                 return;
             }
 
             _duration = track?.Duration ?? TimeSpan.Zero;
             if (AcceptPlayingState(track?.IsPlaying == true))
             {
-                // Âncora no LastUpdatedTime do Windows (não no momento da leitura):
-                // re-ler um snapshot antigo dá o mesmo valor interpolado — sem saltos
+                // Anchor on Windows' LastUpdatedTime (not on the read instant):
+                // re-reading an old snapshot gives the same interpolated value - no jumps
                 TimeSpan pos = track?.Position ?? TimeSpan.Zero;
                 DateTime posAt = track?.PositionAtUtc ?? DateTime.UtcNow;
-                // Snapshot da faixa anterior (posição > duração, ou muito antigo
-                // numa faixa acabada de mudar): mostrar do início até assentar
+                // Snapshot of the previous track (position > duration, or very old
+                // on a just-changed track): show from the start until it settles
                 bool stale = pos > _duration ||
                              (track != null && track.Title + "|" + track.Artist != _lastTrackKey &&
                               DateTime.UtcNow - posAt > TimeSpan.FromSeconds(5));
@@ -1055,7 +1086,7 @@ public partial class MainWindow : Window
                     pos = TimeSpan.Zero;
                     posAt = DateTime.UtcNow;
                 }
-                // Após um seek, ignorar posições fotografadas ANTES do salto
+                // After a seek, ignore positions captured BEFORE the jump
                 if (!(DateTime.UtcNow - _seekAt < TimeSpan.FromSeconds(3) && posAt < _seekAt))
                 {
                     _basePosition = pos;
@@ -1090,8 +1121,8 @@ public partial class MainWindow : Window
             UpdateMarquee();
             SetPlayPauseIcon(_isPlayingUi);
 
-            // Estado real (favoritos + aleatório + repetição) da árvore de
-            // acessibilidade do Spotify; o SMTC serve de rede de segurança.
+            // Real state (favorites + shuffle + repeat) from Spotify's
+            // accessibility tree; SMTC is the safety net.
             string key = track.Title + "|" + track.Artist;
             bool keyChanged = key != _lastTrackKey;
             if (_spotifyProc && (keyChanged || _uiaDirty || DateTime.UtcNow - _lastUiaStateAt > TimeSpan.FromSeconds(5)))
@@ -1101,15 +1132,15 @@ public partial class MainWindow : Window
                 try { state = await Task.Run(() => _uia.GetState(track.Title)).WaitAsync(TimeSpan.FromSeconds(8)); }
                 catch (TimeoutException) { }
                 _lastStateFresh = state.Fresh;
-                // Grupo ainda da faixa anterior (zombie): não mostrar o tick antigo
+                // Group still from the previous track (zombie): do not show the old tick
                 _uiaState = (state.Fresh ? state.Liked : null, state.Shuffle, state.Repeat);
                 _lastUiaStateAt = DateTime.UtcNow;
             }
             if (_spotifyProc && keyChanged)
-                _ = SettleStateAsync(); // re-ler até o Spotify renderizar a barra da faixa nova
+                _ = SettleStateAsync(); // re-read until Spotify renders the new track's bar
             var (liked, uiaMode, repeatMode) = _uiaState;
-            // Depois de adicionar aos favoritos, ignorar "não gostado" antigo — o
-            // texto do botão do Spotify pode demorar vários segundos a atualizar
+            // After adding to favorites, ignore a stale "not liked" - Spotify's
+            // button text can take several seconds to update
             if (liked == false && DateTime.UtcNow - _likedOptimisticAt < TimeSpan.FromSeconds(8))
                 liked = true;
             _liked = liked;
@@ -1118,16 +1149,16 @@ public partial class MainWindow : Window
 
             LikeIcon.Data = liked == true ? CheckCircleGeo : AddCircleGeo;
             LikeIcon.Fill = liked == true ? SpotifyGreen : (liked == false ? Subdued : DimWhite);
-            // Honesto: com o Spotify minimizado não conseguimos confirmar o
-            // estado (null) — dizê-lo em vez de deixar o "+" parecer "não gostado"
+            // Honest: with Spotify minimized we cannot confirm the state (null) -
+            // say so instead of letting the "+" look like "not liked"
             LikeButton.ToolTip = liked == true ? L.TipLiked
                                : liked == false ? L.TipLikeAdd
                                : L.TipLikeUnknown;
 
             ShuffleMode mode = uiaMode;
-            // A rede de segurança do SMTC atrasa-se vários segundos após um
-            // clique — sobrepor-se a uma leitura UIA fresca fazia o ícone
-            // piscar On→Off→On; janela de graça como no play/pause
+            // The SMTC safety net lags several seconds behind a click - letting
+            // it override a fresh UIA read made the icon flicker On->Off->On;
+            // grace window like the one on play/pause
             if (DateTime.UtcNow - _shuffleToggledAt > TimeSpan.FromSeconds(4))
             {
                 if (track.IsShuffle == false && mode != ShuffleMode.Unknown)
@@ -1148,8 +1179,8 @@ public partial class MainWindow : Window
                 BitmapImage? art = null;
                 if (bytes != null)
                 {
-                    // Miniaturas truncadas/corrompidas acontecem em transições
-                    // de faixa — não podem rebentar o refresh inteiro
+                    // Truncated/corrupt thumbnails happen on track transitions -
+                    // they must not blow up the whole refresh
                     try { art = ToBitmap(bytes); } catch { }
                 }
                 SetAlbumArt(art);
@@ -1161,10 +1192,10 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Troca a capa com um crossfade suave: a nova esbate para dentro
-    /// por cima da atual (camada de topo) e depois passa a ser a base — em vez
-    /// da troca seca, dá o toque "premium" pedido. Sem capa antes: fade simples
-    /// a partir do placeholder; sem capa nova: volta ao placeholder.</summary>
+    /// <summary>Swaps the cover with a smooth crossfade: the new one fades in over
+    /// the current one (top layer) and then becomes the base - instead of the dry
+    /// swap, it gives the "premium" touch that was asked for. With no cover before:
+    /// a simple fade from the placeholder; with no new cover: back to it.</summary>
     private void SetAlbumArt(BitmapImage? art)
     {
         const int FadeMs = 250;
@@ -1182,7 +1213,7 @@ public partial class MainWindow : Window
         bool hadArt = ArtImage.Visibility == Visibility.Visible && ArtBrush.ImageSource != null;
         if (!hadArt)
         {
-            // Vinha do placeholder: aparecer com um fade curto
+            // Coming from the placeholder: appear with a short fade
             ArtBrush.ImageSource = art;
             ArtImage.BeginAnimation(OpacityProperty, null);
             ArtImage.Opacity = 1;
@@ -1193,8 +1224,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        // Já havia capa: crossfade real — a nova na camada de topo a esbater
-        // para dentro por cima da atual
+        // There was already a cover: real crossfade - the new one on the top
+        // layer fading in over the current one
         ArtImage.BeginAnimation(OpacityProperty, null);
         ArtImage.Opacity = 1;
         ArtBrushTop.ImageSource = art;
@@ -1202,7 +1233,7 @@ public partial class MainWindow : Window
         var fade = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(FadeMs));
         fade.Completed += (_, _) =>
         {
-            // A de topo passa a ser a base; a de topo esconde-se p/ a próxima
+            // The top one becomes the base; the top hides for the next swap
             ArtBrush.ImageSource = art;
             ArtImageTop.BeginAnimation(OpacityProperty, null);
             ArtImageTop.Opacity = 0;
@@ -1225,10 +1256,10 @@ public partial class MainWindow : Window
         return bmp;
     }
 
-    // ---------- Controlos ----------
+    // ---------- Controls ----------
 
-    /// <summary>O triângulo de play centrado geometricamente parece deslocado à
-    /// esquerda (a massa visual fica à esquerda) — compensação ótica de 1,5px.</summary>
+    /// <summary>A geometrically centred play triangle looks shifted to the left
+    /// (its visual mass sits left) - 1.5px optical compensation.</summary>
     private void SetPlayPauseIcon(bool playing)
     {
         PlayPauseIcon.Data = playing ? PauseGeo : PlayGeo;
@@ -1265,16 +1296,16 @@ public partial class MainWindow : Window
             ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    /// <summary>Atualização leve disparada pelos eventos de timeline (frequentes).
-    /// Fora da thread de UI e com timeout: o SMTC pode pendurar em sessões mortas.</summary>
+    /// <summary>Light refresh fired by the timeline events (frequent).
+    /// Off the UI thread and with a timeout: SMTC can hang on dead sessions.</summary>
     private async void RefreshTimeline()
     {
         (TimeSpan Position, TimeSpan Duration, bool IsPlaying, DateTime PositionAtUtc)? tlMaybe = null;
         try { tlMaybe = await Task.Run(() => _media.GetTimeline()).WaitAsync(TimeSpan.FromSeconds(3)); }
         catch (TimeoutException) { }
         if (tlMaybe is not { } tl) return;
-        // Depois de um seek, snapshots ANTERIORES ao salto ainda chegam durante
-        // uns segundos — aplicá-los fazia a barra recuar e voltar a saltar
+        // After a seek, snapshots from BEFORE the jump keep arriving for a few
+        // seconds - applying them made the bar go back and jump again
         if (DateTime.UtcNow - _seekAt < TimeSpan.FromSeconds(3) && tl.PositionAtUtc < _seekAt)
             return;
         _duration = tl.Duration;
@@ -1290,13 +1321,13 @@ public partial class MainWindow : Window
 
     private async void PlayPause_Click(object sender, RoutedEventArgs e)
     {
-        // Feedback imediato; leituras antigas são ignoradas por 2 s (grace) e
-        // depois disso o estado real do SMTC volta a mandar
+        // Immediate feedback; old reads are ignored for 2s (grace) and after
+        // that the real SMTC state takes over again
         _isPlayingUi = !_isPlayingUi;
         _playToggledAt = DateTime.UtcNow;
         SetPlayPauseIcon(_isPlayingUi);
         if (!_isPlayingUi)
-            _basePosition += DateTime.UtcNow - _basePositionAt; // congelar posição
+            _basePosition += DateTime.UtcNow - _basePositionAt; // freeze the position
         _basePositionAt = DateTime.UtcNow;
         await _media.TogglePlayPauseAsync();
     }
@@ -1305,7 +1336,7 @@ public partial class MainWindow : Window
 
     private async void Shuffle_Click(object sender, RoutedEventArgs e)
     {
-        // Feedback imediato: cicla localmente; a leitura de estado corrige se preciso
+        // Immediate feedback: cycle locally; the state read corrects it if needed
         var next = _uiaState.Shuffle switch
         {
             ShuffleMode.Off => ShuffleMode.On,
@@ -1322,7 +1353,7 @@ public partial class MainWindow : Window
 
         bool ok = await Task.Run(() => _uia.CycleShuffle());
         if (!ok)
-            await _media.ToggleShuffleAsync(); // sem janela do Spotify: só liga/desliga
+            await _media.ToggleShuffleAsync(); // no Spotify window: on/off only
         await Task.Delay(400);
         _uiaDirty = true;
         await RefreshTrackAsync();
@@ -1330,7 +1361,7 @@ public partial class MainWindow : Window
 
     private async void Repeat_Click(object sender, RoutedEventArgs e)
     {
-        // Feedback imediato: cicla localmente; a leitura de estado corrige se preciso
+        // Immediate feedback: cycle locally; the state read corrects it if needed
         var next = _uiaState.Repeat switch
         {
             RepeatMode.Off => RepeatMode.Context,
@@ -1346,7 +1377,7 @@ public partial class MainWindow : Window
 
         bool ok = await Task.Run(() => _uia.CycleRepeat());
         if (!ok)
-            await _media.CycleRepeatAsync(); // sem janela do Spotify: tentar via SMTC
+            await _media.CycleRepeatAsync(); // no Spotify window: try through SMTC
         await Task.Delay(400);
         _uiaDirty = true;
         await RefreshTrackAsync();
@@ -1354,9 +1385,9 @@ public partial class MainWindow : Window
 
     private async void Like_Click(object sender, RoutedEventArgs e)
     {
-        if (_liked == true) return; // já está nos favoritos
+        if (_liked == true) return; // already in favorites
 
-        // Feedback imediato; se falhar, a leitura de estado seguinte corrige
+        // Immediate feedback; if it fails, the next state read corrects it
         _liked = true;
         _likedOptimisticAt = DateTime.UtcNow;
         LikeIcon.Data = CheckCircleGeo;
@@ -1365,10 +1396,10 @@ public partial class MainWindow : Window
 
         bool ok = await Task.Run(() => _uia.AddToFavorites());
         if (!ok)
-            await Task.Run(() => _uia.AddToFavoritesByClick()); // recurso raro: sem verbo disponível
+            await Task.Run(() => _uia.AddToFavoritesByClick()); // rare fallback: no verb available
 
-        // O texto do botão do Spotify demora segundos a refletir a adição —
-        // reconciliar mais tarde em vez de concluir já que falhou
+        // Spotify's button text takes seconds to reflect the addition -
+        // reconcile later instead of concluding right away that it failed
         _ = ReconcileLikeLaterAsync();
     }
 
@@ -1379,7 +1410,7 @@ public partial class MainWindow : Window
         await RefreshTrackAsync();
     }
 
-    /// <summary>Re-verificação rápida durante o vazio transitório das mudanças de faixa.</summary>
+    /// <summary>Quick re-check during the transient gap of track changes.</summary>
     private async Task QuickRecheckAsync()
     {
         await Task.Delay(350);
@@ -1389,13 +1420,13 @@ public partial class MainWindow : Window
     private int _settleToken;
     private bool _lastStateFresh = true;
 
-    /// <summary>Depois de uma mudança de faixa, re-ler a cada 500 ms até o grupo
-    /// do título no Spotify já ser o da faixa nova (validado pelo título do SMTC).
-    /// Uma nova mudança de faixa cancela a série anterior.</summary>
+    /// <summary>After a track change, re-read every 500ms until Spotify's title
+    /// group belongs to the new track (validated against the SMTC title).
+    /// A new track change cancels the previous series.</summary>
     private async Task SettleStateAsync()
     {
         int token = ++_settleToken;
-        for (int i = 0; i < 12; i++) // máx. ~6 s
+        for (int i = 0; i < 12; i++) // max ~6s
         {
             await Task.Delay(500);
             if (token != _settleToken) return;
@@ -1413,22 +1444,22 @@ public partial class MainWindow : Window
             return;
         }
         if (_volLoading)
-            return; // já há uma abertura em curso — outra sobrescreveria o
-                    // ajuste do utilizador com o volume antigo ao completar
+            return; // an open is already under way - another one would overwrite
+                    // the user's adjustment with the old volume on completion
 
         CaptureForeground();
         _volLoading = true;
         try
         {
-            // O recurso CoreAudio também fora da thread de UI — é uma RPC ao
-            // serviço de áudio e chegava a bloquear a interface
+            // The CoreAudio fallback also off the UI thread - it is an RPC to the
+            // audio service and it did block the interface at times
             double? current = await Task.Run(() => _uia.GetVolume() ?? SpotifyVolume.GetVolume());
             if (_closed || Visibility != Visibility.Visible)
-                return; // o widget escondeu-se durante a leitura: não abrir
-                        // um popup órfão a flutuar sobre a barra
-            // Atribuir COM _volLoading ainda ativo: senão o ValueChanged ecoava
-            // a leitura de volta ao Spotify em cada abertura — e uma leitura
-            // falhada (null → 100%) rebentava o volume só por abrir o popup
+                return; // the widget hid during the read: do not open an orphan
+                        // popup floating over the bar
+            // Assign WITH _volLoading still set: otherwise ValueChanged echoed the
+            // read back to Spotify on every open - and a failed read (null -> 100%)
+            // blew up the volume just by opening the popup
             if (current is double v)
                 VolumeSlider.Value = v * 100;
         }
@@ -1449,9 +1480,9 @@ public partial class MainWindow : Window
     private bool _volApplying;
 
     /// <summary>
-    /// Aplica o volume no slider do próprio Spotify (a UI dele acompanha),
-    /// com o mixer do Windows como recurso. Serializa os pedidos para o
-    /// arrastar do slider não acumular chamadas.
+    /// Applies the volume on Spotify's own slider (its UI follows along),
+    /// with the Windows mixer as the fallback. Serializes the requests so
+    /// dragging the slider does not pile up calls.
     /// </summary>
     private async void ApplyVolume(double fraction)
     {
@@ -1480,22 +1511,22 @@ public partial class MainWindow : Window
 
     private int _wheelAccum;
 
-    /// <summary>Roda do rato sobre o botão/popup de volume: fechado abre (com o
-    /// volume atual carregado), aberto ajusta ±5 — como no próprio Spotify.</summary>
+    /// <summary>Mouse wheel over the volume button/popup: closed it opens (with
+    /// the current volume loaded), open it adjusts by 5 - like Spotify itself.</summary>
     private void Volume_MouseWheel(object sender, MouseWheelEventArgs e)
     {
         e.Handled = true;
         if (!VolumePopup.IsOpen)
         {
-            Volume_Click(sender, null!); // o guard de _volLoading evita reentradas
+            Volume_Click(sender, null!); // the _volLoading guard prevents re-entry
             return;
         }
         if (_volLoading) return;
-        // Acumular o delta em vez de ±5 por EVENTO: touchpads de precisão
-        // mandam dezenas de eventos pequenos por gesto (o volume ia de 50 a 0
-        // num toque) e rodas rápidas juntam vários notches num evento só
-        // Inverter o sentido descarta o resto acumulado — senão o primeiro
-        // notch da direção contrária era "engolido" a cancelar o resíduo
+        // Accumulate the delta instead of 5 per EVENT: precision touchpads send
+        // dozens of small events per gesture (volume went from 50 to 0 in one
+        // touch) and fast wheels pack several notches into a single event.
+        // Reversing direction discards the accumulated remainder - otherwise the
+        // first notch the other way was "swallowed" cancelling the residue
         if (_wheelAccum != 0 && Math.Sign(_wheelAccum) != Math.Sign(e.Delta))
             _wheelAccum = 0;
         _wheelAccum += e.Delta;
@@ -1505,7 +1536,7 @@ public partial class MainWindow : Window
         VolumeSlider.Value = Math.Clamp(VolumeSlider.Value + 5 * steps, 0, 100);
     }
 
-    // ---------- Tema (barra clara/escura) ----------
+    // ---------- Theme (light/dark bar) ----------
 
     private static bool IsSystemLightTheme()
     {
@@ -1521,8 +1552,8 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>A barra de tarefas segue o tema do SISTEMA (não o das apps);
-    /// numa barra clara os textos/ícones têm de escurecer.</summary>
+    /// <summary>The taskbar follows the SYSTEM theme (not the app one); on a
+    /// light bar the text/icons have to darken.</summary>
     private void ApplyThemeIfChanged()
     {
         bool light = IsSystemLightTheme();
@@ -1544,36 +1575,36 @@ public partial class MainWindow : Window
         if (!ProgressTrack.IsMouseOver)
             ProgressFill.Background = _progressFillNormal;
 
-        // Botão play: círculo branco no escuro, preto no claro (como o Spotify)
+        // Play button: white circle on dark, black on light (like Spotify)
         PlayPauseButton.Background = light ? Brushes.Black : Brushes.White;
         PlayPauseIcon.Fill = light ? Brushes.White : Brushes.Black;
 
-        _marqueeKey = ""; // sem efeito no texto, mas força refresh coerente
+        _marqueeKey = ""; // no effect on the text, but forces a coherent refresh
         _ = RefreshTrackAsync();
     }
 
-    // ---------- Marquee do título ----------
+    // ---------- Title marquee ----------
 
     private string _marqueeKey = "";
 
-    /// <summary>Título maior do que a coluna de texto → scroll contínuo com pausas,
-    /// como no Spotify; caso contrário fica estático.</summary>
+    /// <summary>Title wider than the text column -> continuous scroll with pauses,
+    /// like Spotify; otherwise it stays static.</summary>
     private void UpdateMarquee()
     {
         double clipWidth = TextStack.Width;
-        // O DPI entra na chave: a largura renderizada muda com a escala do
-        // monitor e a decisão de scroll ficava obsoleta ao mudar de ecrã
+        // DPI goes into the key: the rendered width changes with the monitor
+        // scale and the scroll decision went stale when moving screens
         string key = $"{TitleText.Text}|{clipWidth:0}|{VisualTreeHelper.GetDpi(this).PixelsPerDip:0.##}|{TitleText.FontFamily.Source}";
         if (key == _marqueeKey) return;
         _marqueeKey = key;
 
-        // Medir a largura REALMENTE renderizada. A janela usa
-        // TextFormattingMode=Display (avanços ajustados ao píxel) e o
-        // FormattedText mede em modo Ideal — a diferença varia com a escala do
-        // ecrã e o tipo de letra, e nalgumas máquinas passava da tolerância:
-        // títulos que cabiam faziam scroll na mesma (report da comunidade).
-        // Medir o próprio TextBlock sem restrições dá o valor exato do que se
-        // desenha (está num Canvas, o layout já não o constrange).
+        // Measure the width that is REALLY rendered. The window uses
+        // TextFormattingMode=Display (pixel-snapped advances) and FormattedText
+        // measures in Ideal mode - the difference varies with screen scale and
+        // font, and on some machines it crossed the tolerance: titles that fit
+        // scrolled anyway (community report).
+        // Measuring the TextBlock itself unconstrained gives the exact value of
+        // what gets drawn (it sits in a Canvas, the layout no longer constrains it).
         TitleText.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         double textWidth = Math.Ceiling(TitleText.DesiredSize.Width);
 
@@ -1586,34 +1617,34 @@ public partial class MainWindow : Window
             double scrollSeconds = Math.Max(1.5, overflow / 25.0);
             double end = -(overflow + 12);
             var anim = new DoubleAnimationUsingKeyFrames();
-            double t = 2.5; // pausa inicial (ler o início)
+            double t = 2.5; // initial pause (read the start)
             anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.Zero)));
             anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
             t += scrollSeconds;
             anim.KeyFrames.Add(new LinearDoubleKeyFrame(end, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
-            t += 1.5; // pausa no fim (ler o resto)
+            t += 1.5; // pause at the end (read the rest)
             anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(end, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
             if (_settings.ScrollTitleOnce)
             {
-                // Uma vez: regressar ao início e ficar estático (#14)
+                // Once: return to the start and stay static (#14)
                 t += 0.6;
                 anim.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
-                // sem RepeatBehavior → corre 1x e o HoldEnd fixa em X=0
+                // no RepeatBehavior -> runs once and HoldEnd pins it at X=0
             }
             else
             {
-                anim.RepeatBehavior = RepeatBehavior.Forever; // contínuo (padrão)
+                anim.RepeatBehavior = RepeatBehavior.Forever; // continuous (default)
             }
             anim.Duration = TimeSpan.FromSeconds(t);
             TitleShift.BeginAnimation(TranslateTransform.XProperty, anim);
         }
-        // Sem overflow: texto parado em X=0 (o Canvas nunca trunca a renderização)
+        // No overflow: text parked at X=0 (the Canvas never truncates the rendering)
     }
 
-    // ---------- Barra de progresso ----------
+    // ---------- Progress bar ----------
 
-    /// <summary>O Spotify só publica a posição de vez em quando; entre leituras,
-    /// a posição é interpolada com o relógio local enquanto está a tocar.</summary>
+    /// <summary>Spotify only publishes the position now and then; between reads
+    /// the position is interpolated with the local clock while playing.</summary>
     private void UpdateProgressUi()
     {
         bool show = _settings.ShowProgress && _spotifyPresent && _duration > TimeSpan.Zero;
@@ -1632,15 +1663,15 @@ public partial class MainWindow : Window
 
     private async void Progress_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (_moveMode) return; // em modo mover, o arrasto tem prioridade
-        e.Handled = true;      // não tratar como clique para abrir o Spotify
+        if (_moveMode) return; // in move mode the drag takes priority
+        e.Handled = true;      // do not treat it as a click to open Spotify
 
         if (_duration <= TimeSpan.Zero || ProgressTrack.ActualWidth <= 0) return;
         double fraction = Math.Clamp(e.GetPosition(ProgressTrack).X / ProgressTrack.ActualWidth, 0, 1);
         var target = TimeSpan.FromTicks((long)(_duration.Ticks * fraction));
 
-        // Atualização otimista para a barra responder já; a janela de graça
-        // impede snapshots pré-salto de a fazer recuar nos segundos seguintes
+        // Optimistic update so the bar reacts immediately; the grace window stops
+        // pre-jump snapshots from dragging it back over the next few seconds
         _seekAt = DateTime.UtcNow;
         _basePosition = target;
         _basePositionAt = DateTime.UtcNow;
@@ -1663,7 +1694,7 @@ public partial class MainWindow : Window
     {
         _settings.ScrollTitleOnce = ScrollOnceMenu.IsChecked;
         _settings.Save();
-        _marqueeKey = ""; // forçar recalcular a animação com o novo modo
+        _marqueeKey = ""; // force the animation to be recomputed with the new mode
         UpdateMarquee();
     }
 
@@ -1675,10 +1706,10 @@ public partial class MainWindow : Window
 
     private DispatcherTimer? _volPopupWatchdog;
 
-    // ---------- Preservação do foco ----------
-    // O popup do volume e o menu de contexto ativam janelas próprias do WPF;
-    // quando fecham, o foco pode ficar órfão e atalhos globais (PrintScreen,
-    // Win+Shift+S) deixam de responder até se clicar noutra janela.
+    // ---------- Focus preservation ----------
+    // The volume popup and the context menu activate WPF windows of their own;
+    // when they close, focus can end up orphaned and global shortcuts
+    // (PrintScreen, Win+Shift+S) stop responding until another window is clicked.
 
     private IntPtr _fgBeforeUi;
 
@@ -1686,14 +1717,14 @@ public partial class MainWindow : Window
     {
         CaptureForeground();
         RebuildMonitorMenu();
-        // Estado global — outra janela (ou o Gestor de Tarefas) pode tê-lo mudado
+        // Global state - another window (or Task Manager) may have changed it
         if (!PackagedApp.IsPackaged)
             AutoStartMenu.IsChecked = IsAutoStartEnabled();
     }
 
-    /// <summary>Um item POR CADA barra de tarefas existente, com seleção
-    /// múltipla — cada monitor marcado tem a sua instância do widget
-    /// (pedido da comunidade). Pelo menos um fica sempre marcado.</summary>
+    /// <summary>One item PER EXISTING taskbar, with multiple selection - every
+    /// ticked monitor gets its own widget instance (community request).
+    /// At least one always stays ticked.</summary>
     private void RebuildMonitorMenu()
     {
         MonitorMenu.Items.Clear();
@@ -1707,15 +1738,15 @@ public partial class MainWindow : Window
                 Header = i == 0 ? L.MonitorPrimary : L.MonitorN(i + 1),
                 IsCheckable = true,
                 IsChecked = monitors.Contains(i),
-                StaysOpenOnClick = true, // marcar vários sem o menu fechar
+                StaysOpenOnClick = true, // tick several without the menu closing
             };
             item.Click += (s, _) =>
             {
                 if (monitors.Contains(index))
                 {
-                    // Tem de sobrar pelo menos um monitor QUE EXISTA — entradas
-                    // de monitores desligados não contam, senão a seleção podia
-                    // ficar só com barras inexistentes e a app toda invisível
+                    // At least one monitor THAT EXISTS has to remain - entries
+                    // for disconnected monitors do not count, otherwise the
+                    // selection could end up all non-existent bars and the whole
                     if (!monitors.Any(m => m != index && m <= count))
                     {
                         ((MenuItem)s).IsChecked = true;
@@ -1729,8 +1760,8 @@ public partial class MainWindow : Window
                     monitors.Sort();
                 }
                 _settings.Save();
-                // Se esta própria janela vai ser removida, fechar o menu antes —
-                // um menu StaysOpen órfão numa janela destruída fica pendurado
+                // If this very window is about to be removed, close the menu first -
+                // an orphan StaysOpen menu on a destroyed window hangs around
                 if (!monitors.Contains(TrayIndex) && Root.ContextMenu is { IsOpen: true } cm)
                     cm.IsOpen = false;
                 SyncToMonitors();
@@ -1739,9 +1770,9 @@ public partial class MainWindow : Window
         }
         if (count == 0)
         {
-            // Sem barras secundárias o Windows não tem onde ancorar o widget
-            // noutro ecrã — explicar como ativar em vez de esconder o menu
-            // (utilizadores achavam que a funcionalidade não existia, issue #11)
+            // Without secondary bars Windows has nowhere to anchor the widget on
+            // another screen - explain how to enable it instead of hiding the menu
+            // (users thought the feature did not exist, issue #11)
             MonitorMenu.Items.Add(new MenuItem
             {
                 Header = L.MonitorHint,
@@ -1767,7 +1798,7 @@ public partial class MainWindow : Window
             Interop.SetForegroundWindow(target);
     }
 
-    // ---------- Mover (só quando ativado no menu) / clique para abrir o Spotify ----------
+    // ---------- Move (only when enabled in the menu) / click to open Spotify ----------
 
     private void Root_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
@@ -1809,12 +1840,15 @@ public partial class MainWindow : Window
             Root.ReleaseMouseCapture();
             if (_dragMoved)
             {
-                // Fica bloqueado nesta posição (modo manual) SÓ nesta barra;
-                // px físicos, indexados pelo monitor desta janela
+                // Locked at this position (manual mode) for THIS bar only;
+                // physical px, indexed by this window's monitor
                 if (Interop.GetWindowRect(_hwnd, out var w))
                 {
                     _settings.ManualX[TrayIndex] = w.Left;
-
+                    // ...and the distance to the tray, which is what drives the
+                    // position from now on (see ManualGap). With no readable
+                    // notification area, forget the old one so a gap measured on
+                    // another bar is not applied here.
                     IntPtr trayNow = GetTargetTray();
                     int? notifyLeft = trayNow != IntPtr.Zero
                         ? Interop.GetTrayNotifyLeft(trayNow)
@@ -1834,7 +1868,7 @@ public partial class MainWindow : Window
         }
     }
 
-    // ---------- Menu de contexto ----------
+    // ---------- Context menu ----------
 
     private void MoveMode_Click(object sender, RoutedEventArgs e)
     {
@@ -1844,8 +1878,8 @@ public partial class MainWindow : Window
 
     private void ResetPos_Click(object sender, RoutedEventArgs e)
     {
-        // Repõe as POSIÇÕES automáticas em todas as barras; a seleção de
-        // monitores fica como está (limpá-la destruía a escolha do utilizador)
+        // Restores the automatic POSITIONS on every bar; the monitor selection
+        // stays as it is (clearing it destroyed the user's choice)
         _settings.AutoPosition = true;
         _settings.ManualX.Clear();
         _settings.ManualGap.Clear();
@@ -1860,15 +1894,19 @@ public partial class MainWindow : Window
     {
         var item = (MenuItem)sender;
         _settings.Scale = double.Parse((string)item.Tag, CultureInfo.InvariantCulture);
-        // O Save propaga a TODAS as janelas via Changed (ApplySettingsUi +
-        // reposicionamento adiado para depois do layout) — nada a fazer aqui
+        // Save propagates to ALL windows through Changed (ApplySettingsUi +
+        // repositioning deferred until after layout) - nothing to do here
         _settings.Save();
     }
 
     private void ApplyScale() => Root.LayoutTransform = new ScaleTransform(_settings.Scale, _settings.Scale);
 
+    /// <summary>Font for title/artist. We keep whatever came from the XAML on
+    /// the first apply - that is where "system default" goes back to.</summary>
     private FontFamily? _xamlFont;
 
+    /// <summary>Cover on/off. Collapsing the whole container is enough: the
+    /// crossfade layers and the placeholder all live inside it.</summary>
     private void ApplyArt() =>
         ArtPanel.Visibility = _settings.ShowArt ? Visibility.Visible : Visibility.Collapsed;
 
@@ -1879,16 +1917,20 @@ public partial class MainWindow : Window
         FontFamily font = _xamlFont;
         if (!string.IsNullOrWhiteSpace(name))
         {
+            // A font uninstalled in the meantime must not break the widget: WPF
+            // only throws when rendering, so we validate here
             try { font = new FontFamily(name); }
             catch { font = _xamlFont; }
         }
         TitleText.FontFamily = font;
         ArtistText.FontFamily = font;
         LauncherText.FontFamily = font;
-
+        // The text width changes with the font: re-decide the marquee
         UpdateMarquee();
     }
 
+    /// <summary>Short list of fonts, filtered to the ones that really exist on
+    /// this machine - a menu with the system's ~400 was unusable on the bar.</summary>
     private static readonly string[] FontChoices =
     {
         "Segoe UI", "Segoe UI Variable", "Arial", "Calibri", "Cascadia Mono",
@@ -1927,12 +1969,18 @@ public partial class MainWindow : Window
                 IsCheckable = true,
                 IsChecked = string.Equals(_settings.FontFamily, name, StringComparison.OrdinalIgnoreCase),
                 Tag = name,
+                // Preview inside the menu itself: choosing blind by name meant
+                // closing and reopening the menu on every attempt
                 FontFamily = new FontFamily(name),
             };
             item.Click += Font_Click;
             FontMenuItem.Items.Add(item);
         }
 
+        // Free text entry: the curated list does not cover the hundreds of fonts
+        // installed. A TextBox INSIDE the menu does not work - the ContextMenu
+        // keeps keyboard focus and swallows the keys (you clicked, typed, and
+        // nothing appeared) - so this opens a window of its own.
         FontMenuItem.Items.Add(new Separator());
 
         bool isCustom = !string.IsNullOrWhiteSpace(_settings.FontFamily) &&
@@ -1945,16 +1993,20 @@ public partial class MainWindow : Window
         };
         customItem.Click += (_, _) =>
         {
+            // The tick only changes with the dialog result, not with the click
             customItem.IsChecked = isCustom;
             if (Root.ContextMenu is { } menu) menu.IsOpen = false;
             string? picked = PromptForFontName(_settings.FontFamily, installed);
-            if (picked == null) return;
+            if (picked == null) return; // cancelled
             _settings.FontFamily = picked;
-            _settings.Save();
+            _settings.Save(); // propagates to every window and rebuilds the menu
         };
         FontMenuItem.Items.Add(customItem);
     }
 
+    /// <summary>Small dialog for typing the name of any installed font.
+    /// Returns null if the user cancels, "" to go back to the system font.</summary>
+    /// do sistema.</summary>
     private string? PromptForFontName(string current, HashSet<string> installed)
     {
         var label = new TextBlock
@@ -1972,7 +2024,8 @@ public partial class MainWindow : Window
             Foreground = new SolidColorBrush(Color.FromRgb(0x99, 0x99, 0x99)),
             Text = L.FontCustomClear,
         };
-
+        // Preview: the box renders in the typed font, so the result is visible
+        // before confirming
         void Validate()
         {
             string n = box.Text.Trim();
@@ -2019,7 +2072,7 @@ public partial class MainWindow : Window
             ResizeMode = ResizeMode.NoResize,
             WindowStartupLocation = WindowStartupLocation.CenterScreen,
             ShowInTaskbar = false,
-
+            // The widget is topmost; without this the dialog could open behind it
             Topmost = true,
         };
         ok.Click += (_, _) => win.DialogResult = true;
@@ -2029,6 +2082,8 @@ public partial class MainWindow : Window
         return win.ShowDialog() == true ? box.Text.Trim() : null;
     }
 
+    /// <summary>Languages offered. The names stay ALWAYS in their own language -
+    /// translating them hides the option from whoever only reads that one.</summary>
     private static readonly (string Code, string Name)[] LanguageChoices =
     {
         ("en", "English"),
@@ -2070,7 +2125,7 @@ public partial class MainWindow : Window
     {
         if (sender is not MenuItem item) return;
         _settings.Language = (string)(item.Tag ?? "");
-        // O Save propaga a todas as janelas: cada uma re-aplica os textos
+        // Save propagates to every window: each one re-applies the strings
         _settings.Save();
     }
 
@@ -2078,6 +2133,7 @@ public partial class MainWindow : Window
     {
         if (sender is not MenuItem item) return;
         _settings.FontFamily = (string)(item.Tag ?? "");
+        // Save propagates to every window through Changed (ApplySettingsUi)
         _settings.Save();
     }
 
@@ -2088,23 +2144,23 @@ public partial class MainWindow : Window
         SizeLarge.IsChecked = _settings.Scale > 1.05;
     }
 
-    /// <summary>Brilho/opacidade do widget — pedido de utilizadores OLED que
-    /// escurecem a barra: um widget a brilho total destoa e marca o painel.</summary>
+    /// <summary>Widget brightness/opacity - requested by OLED users who dim the
+    /// bar: a widget at full brightness clashes and marks the panel.</summary>
     private bool _opacityLoading;
 
-    /// <summary>Slider de brilho 20–100% (pedido da comunidade OLED). Pré-visualiza
-    /// ao vivo ao arrastar; grava no fim, uma vez, para não inundar o disco nem
-    /// o evento Changed com um Save por cada passo do arrasto.</summary>
+    /// <summary>Brightness slider 20-100% (OLED community request). Previews live
+    /// while dragging; saves once at the end, so as not to flood the disk nor the
+    /// Changed event with a Save per drag step.</summary>
     private void OpacitySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        // Durante o carregamento do XAML, definir Minimum=20 coage o Value de 0
-        // para 20 e dispara este evento ANTES de Root/OpacityValueText existirem
-        // — sem este guard era NRE e a janela nunca se construía (widget sumia)
+        // While the XAML loads, setting Minimum=20 coerces Value from 0 to 20 and
+        // fires this event BEFORE Root/OpacityValueText exist - without this guard
+        // it was an NRE and the window never built (the widget vanished)
         if (_opacityLoading || !_uiReady) return;
         _settings.Opacity = Math.Clamp(e.NewValue / 100.0, 0.2, 1.0);
         ApplyOpacity();
         OpacityValueText.Text = $"{Math.Round(e.NewValue)}%";
-        // Adiar o Save até o slider assentar (sem eventos por ~400ms)
+        // Defer the Save until the slider settles (no events for ~400ms)
         _opacitySaveTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _opacitySaveTimer.Stop();
         _opacitySaveTimer.Tick -= OpacitySaveTick;
@@ -2117,14 +2173,14 @@ public partial class MainWindow : Window
     private void OpacitySaveTick(object? sender, EventArgs e)
     {
         _opacitySaveTimer?.Stop();
-        _settings.Save(); // propaga a todas as janelas via Changed
+        _settings.Save(); // propagates to every window through Changed
     }
 
     private int _opacityWheelAccum;
 
-    /// <summary>Roda do rato sobre o slider de brilho: ±5% por notch, igual ao
-    /// volume. Acumula o delta (touchpads de precisão mandam muitos eventos
-    /// pequenos) e descarta o resto ao inverter o sentido.</summary>
+    /// <summary>Mouse wheel over the brightness slider: 5% per notch, same as
+    /// volume. Accumulates the delta (precision touchpads send many small events)
+    /// and discards the remainder when the direction reverses.</summary>
     private void Opacity_MouseWheel(object sender, MouseWheelEventArgs e)
     {
         e.Handled = true;
@@ -2134,7 +2190,7 @@ public partial class MainWindow : Window
         int steps = _opacityWheelAccum / 120;
         if (steps == 0) return;
         _opacityWheelAccum -= steps * 120;
-        // Mexer no Value dispara o ValueChanged, que aplica e agenda o Save
+        // Touching Value fires ValueChanged, which applies it and schedules the Save
         OpacitySlider.Value = Math.Clamp(OpacitySlider.Value + 5 * steps, 20, 100);
     }
 
@@ -2143,12 +2199,15 @@ public partial class MainWindow : Window
     private bool _textPadLoading;
     private DispatcherTimer? _textPadSaveTimer;
 
+    /// <summary>Gap between the text and the buttons (fit-to-text mode).
+    /// Previews while dragging and saves only when the slider settles, like
+    /// brightness - a Save per step flooded the disk and the Changed event.</summary>
     private void TextPadSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (_textPadLoading || !_uiReady) return;
         _settings.TextPadding = Math.Clamp(e.NewValue, 0, 40);
         TextPadValueText.Text = $"{Math.Round(e.NewValue)} px";
-
+        // The text column changes width: redo the layout now
         _marqueeKey = "";
         UpdatePosition();
         _textPadSaveTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
@@ -2184,13 +2243,14 @@ public partial class MainWindow : Window
         TextPadSlider.Value = Math.Round(_settings.TextPadding);
         TextPadValueText.Text = $"{Math.Round(_settings.TextPadding)} px";
         _textPadLoading = false;
-
+        // Without fit-to-text the gap does nothing - say so instead of offering
+        // a slider that moves nothing
         TextPadMenuItem.IsEnabled = _settings.AutoSizeText;
     }
 
     private void UpdateOpacityChecks()
     {
-        // Refletir o valor guardado no slider sem redisparar o Save
+        // Reflect the stored value on the slider without re-firing the Save
         _opacityLoading = true;
         OpacitySlider.Value = Math.Round(_settings.Opacity * 100);
         OpacityValueText.Text = $"{Math.Round(_settings.Opacity * 100)}%";
@@ -2201,7 +2261,7 @@ public partial class MainWindow : Window
     {
         _settings.ShowArt = ArtMenu.IsChecked;
         _settings.Save();
-
+        // Turning it back on: the current track's cover has to be requested again
         _artDirty = true;
         _ = RefreshTrackAsync();
         UpdatePosition();
@@ -2211,7 +2271,7 @@ public partial class MainWindow : Window
     {
         _settings.AutoSizeText = AutoSizeMenu.IsChecked;
         _settings.Save();
-
+        // The column changes width now, without waiting for the next track
         _marqueeKey = "";
         UpdatePosition();
     }
@@ -2317,8 +2377,8 @@ public partial class MainWindow : Window
         UpdateMenu.IsEnabled = false;
         try
         {
-            // Se a verificação silenciosa já encontrou uma versão nova, usar
-            // esse resultado (ir direto ao pedido) em vez de re-verificar
+            // If the silent check already found a new version, use that result
+            // (go straight to the prompt) instead of checking again
             var update = _pendingUpdate ?? await UpdateService.CheckAsync();
             if (update == null)
             {
@@ -2342,9 +2402,9 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Verificação silenciosa: ao arrancar e depois a cada 6 h (um
-    /// widget fica dias aberto e nunca reparava de outra forma). Se houver
-    /// versão nova, realça o item do menu em TODAS as janelas.</summary>
+    /// <summary>Silent check: at startup and then every 6h (a widget stays open
+    /// for days and would never notice otherwise). If there is a new version, it
+    /// highlights the menu item in ALL windows.</summary>
     private async Task CheckUpdatesQuietlyAsync()
     {
         await Task.Delay(TimeSpan.FromSeconds(20));
@@ -2370,12 +2430,12 @@ public partial class MainWindow : Window
             w.RefreshUpdateMenu();
     }
 
-    /// <summary>Aplica o realce "nova versão" ao item do menu (verde + negrito +
-    /// ⬤) se houver uma atualização pendente. Chamado ao carregar a janela e
-    /// quando a verificação encontra uma versão nova.</summary>
+    /// <summary>Applies the "new version" highlight to the menu item (green + bold
+    /// + a dot) when an update is pending. Called when the window loads and when
+    /// the check finds a new version.</summary>
     private void RefreshUpdateMenu()
     {
-        if (PackagedApp.IsPackaged) return; // a Store trata das atualizações
+        if (PackagedApp.IsPackaged) return; // the Store handles updates
         if (_pendingUpdate is { } u)
         {
             UpdateMenu.Header = L.UpdateAvailable(u.Version);
@@ -2393,30 +2453,30 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         base.OnClosed(e);
-        _closed = true; // trava a continuação do OnLoaded se ainda estiver no await
+        _closed = true; // stops OnLoaded continuing if it is still in the await
         _positionTimer.Stop();
         _trackTimer.Stop();
-        CancelRide(); // o tick do ride não pode continuar num hwnd morto
+        CancelRide(); // the ride tick must not continue on a dead hwnd
         if (_mediaChanged != null) _media.Changed -= _mediaChanged;
         if (_mediaTimeline != null) _media.TimelineChanged -= _mediaTimeline;
-        _media.Shutdown(); // solta as subscrições WinRT que prendiam a janela
+        _media.Shutdown(); // releases the WinRT subscriptions that pinned the window
         WidgetSettings.Changed -= OnSettingsChanged;
         Instances.Remove(this);
-        // Última janela fechada (ex.: reinício do Explorer): reabrir a porta à
-        // verificação de updates, para o widget recriado voltar a verificar
+        // Last window closed (e.g. an Explorer restart): reopen the door to the
+        // update check, so the recreated widget checks again
         if (Instances.Count == 0)
             _updateCheckStarted = false;
         if (!App.IntentionalExit && !ClosedByApp && !_recreatePending)
         {
-            // Explorer reiniciou e levou as janelas (são owned pelas barras):
-            // um só waiter recria o conjunto todo quando a barra voltar
+            // Explorer restarted and took the windows with it (they are owned by
+            // the bars): a single waiter recreates the whole set when it returns
             _recreatePending = true;
             _ = RecreateAfterTaskbarRestartAsync();
         }
     }
 
-    /// <summary>Como o widget é owned pela taskbar, um reinício do Explorer
-    /// destrói a(s) janela(s) — esperar pela barra nova e recriar o conjunto.</summary>
+    /// <summary>Since the widget is owned by the taskbar, an Explorer restart
+    /// destroys the window(s) - wait for the new bar and recreate the set.</summary>
     private static async Task RecreateAfterTaskbarRestartAsync()
     {
         try
@@ -2426,7 +2486,7 @@ public partial class MainWindow : Window
                 await Task.Delay(1000);
                 if (Interop.FindWindow("Shell_TrayWnd", null) != IntPtr.Zero)
                 {
-                    await Task.Delay(2000); // deixar a barra (e as secundárias) assentar
+                    await Task.Delay(2000); // let the bar (and the secondaries) settle
                     SyncToMonitors();
                     return;
                 }

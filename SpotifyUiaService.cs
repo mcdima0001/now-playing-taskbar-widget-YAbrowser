@@ -7,19 +7,19 @@ public enum ShuffleMode { Unknown, Off, On, Smart }
 public enum RepeatMode { Unknown, Off, Context, Track }
 
 /// <summary>
-/// Lê e controla o estado dos favoritos, modo aleatório, repetição e volume
-/// através da árvore de acessibilidade da janela do Spotify (Chromium).
+/// Reads and controls the favorites, shuffle, repeat and volume state through
+/// the accessibility tree of the Spotify window (Chromium).
 ///
-/// O Spotify recria os botões no DOM a cada mudança de faixa, por isso só os
-/// CONTENTORES estáveis ficam em cache (grupo de controlos do leitor e grupo
-/// do título/artista); os botões são procurados frescos dentro deles a cada
-/// uso — subárvores pequenas, milissegundos. A reconstrução completa (cara)
-/// só acontece quando os próprios contentores morrem.
+/// Spotify recreates the buttons in the DOM on every track change, so only the
+/// stable CONTAINERS are cached (the player controls group and the title/artist
+/// group); the buttons are looked up fresh inside them on each use - small
+/// subtrees, milliseconds. The full (expensive) rebuild only happens when the
+/// containers themselves die.
 ///
-/// Estado a partir dos nomes/aria (independente do idioma sempre que possível):
-/// - favoritos: guardado ⇔ o nome refere "playlist";
-/// - aleatório: nome descreve a próxima ação (Ativar/Desativar + "inteligente");
-/// - repetição: aria-checked false/true/mixed = desligado/playlist/faixa.
+/// State from names/aria (language independent wherever possible):
+/// - favorites: saved <=> the name mentions "playlist";
+/// - shuffle: the name describes the next action (Enable/Disable + "smart");
+/// - repeat: aria-checked false/true/mixed = off/playlist/track.
 /// </summary>
 public sealed class SpotifyUiaService
 {
@@ -30,21 +30,21 @@ public sealed class SpotifyUiaService
         { "desativar", "disable", "desactivar", "désactiver", "deaktivieren",
           "disattiva", "uitschakelen", "wyłącz", "stäng av", "slå fra", "kapat" };
 
-    // Favoritos: quando a faixa está guardada, o botão passa a referir a
-    // "playlist" (o menu "adicionar a playlist"). Muitos idiomas mantêm o
-    // anglicismo (PT/ES/IT/DE/FR) — e "playlista" (PL) contém "playlist" —,
-    // mas os nórdicos e o neerlandês traduzem. Casado com Contains.
+    // Favorites: when the track is saved, the button starts mentioning the
+    // "playlist" (the "add to playlist" menu). Many languages keep the
+    // anglicism (PT/ES/IT/DE/FR) - and "playlista" (PL) contains "playlist" -
+    // but the Nordic languages and Dutch translate it. Matched with Contains.
     private static readonly string[] PlaylistTerms =
         { "playlist", "spellista", "spilleliste", "soittolista", "afspeellijst" };
 
     private static bool IsLikedName(string name) =>
         PlaylistTerms.Any(t => name.Contains(t, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Regista UMA vez cada nome distinto dos botões de favoritos e
-    /// aleatório, mas só em Windows não-inglês — a população afetada pelo #16.
-    /// Assim recolhemos os nomes reais que o Spotify expõe nesses idiomas e
-    /// expandimos as listas de termos com dados, em vez de adivinhar. Sem ruído
-    /// para os utilizadores ingleses (a maioria, e onde a deteção já acerta).</summary>
+    /// <summary>Logs ONCE each distinct name of the favorites and shuffle
+    /// buttons, but only on non-English Windows - the population hit by #16.
+    /// That collects the real names Spotify exposes in those languages so the
+    /// term lists can grow from data instead of guesswork. No noise for English
+    /// users (the majority, and where detection already works).</summary>
     private static void LogI18nNames(string likeName, string shuffleName)
     {
         if (System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName
@@ -67,27 +67,27 @@ public sealed class SpotifyUiaService
     private static readonly Condition SliderCond =
         new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Slider);
 
-    // Só o grupo de CONTROLOS fica em cache (estável entre faixas). O grupo do
-    // título é recriado a cada faixa — o Chromium mantém o nó antigo legível
-    // ("zombie") durante segundos, pelo que tem de ser derivado fresco a cada
-    // leitura, e validado contra o título atual (o nome do grupo contém-no).
+    // Only the CONTROLS group is cached (stable across tracks). The title group
+    // is recreated on every track - Chromium keeps the old node readable
+    // ("zombie") for seconds, so it has to be derived fresh on every read and
+    // validated against the current title (the group name contains it).
     private readonly object _lock = new();
-    private AutomationElement? _controlsGroup;   // aleatório/anterior/play/seguinte + checkbox de repetição
+    private AutomationElement? _controlsGroup;   // shuffle/previous/play/next + repeat checkbox
 
     private RangeValuePattern? _volumePattern;
     private double _volMin;
     private double _volMax = 1;
 
-    // ---------- Estado ----------
+    // ---------- State ----------
 
-    /// <summary>Lê o estado. <paramref name="expectedTitle"/> (vindo do SMTC, que
-    /// atualiza no instante) valida que o grupo do título já é o da faixa atual;
-    /// Fresh=false indica leitura possivelmente obsoleta (o chamador re-tenta).</summary>
+    /// <summary>Reads the state. <paramref name="expectedTitle"/> (from SMTC, which
+    /// updates instantly) proves the title group already belongs to the current
+    /// track; Fresh=false means a possibly stale read (the caller retries).</summary>
     public (bool? Liked, ShuffleMode Shuffle, RepeatMode Repeat, bool Fresh) GetState(string? expectedTitle = null)
     {
-        // TryEnter com timeout em vez de lock: uma chamada UIA pendurada num
-        // Spotify a morrer segurava o lock para SEMPRE (o WaitAsync do chamador
-        // abandona a espera mas não solta o lock) e todos os botões morriam
+        // TryEnter with a timeout instead of lock: a UIA call hung on a dying
+        // Spotify held the lock FOREVER (the caller's WaitAsync abandons the
+        // wait but does not release the lock) and every button died with it
         if (!Monitor.TryEnter(_lock, TimeSpan.FromSeconds(3)))
             return (null, ShuffleMode.Unknown, RepeatMode.Unknown, false);
         try
@@ -116,14 +116,14 @@ public sealed class SpotifyUiaService
                 {
                     string n = shuffleName.ToLowerInvariant();
                     bool smart = SmartTerms.Any(n.Contains);
-                    // Contains (não StartsWith): idiomas com o verbo no fim
-                    // ("… deaktivieren", "… kapat") não começam pelo termo
+                    // Contains (not StartsWith): languages with the verb at the
+                    // end ("... deaktivieren", "... kapat") do not start with the term
                     bool disable = DisableTerms.Any(n.Contains);
                     shuffleMode = smart ? (disable ? ShuffleMode.Smart : ShuffleMode.On) : ShuffleMode.Off;
                 }
 
-                // Recolher os nomes reais dos botões nos idiomas afetados (#16),
-                // para expandir as listas de termos com dados em vez de adivinhar
+                // Collect the real button names in the affected languages (#16),
+                // to grow the term lists from data instead of guessing
                 LogI18nNames(likeName, shuffleName);
 
                 var repeatMode = RepeatMode.Unknown;
@@ -154,25 +154,25 @@ public sealed class SpotifyUiaService
         }
     }
 
-    // ---------- Ações ----------
+    // ---------- Actions ----------
 
-    /// <summary>Adiciona aos favoritos e CONFIRMA que ficou guardado (o nome do
-    /// botão passa a referir "playlist"). Sem confirmação devolve false, para o
-    /// chamador usar o atalho de teclado como recurso. Não invoca quando já
-    /// está guardado (nesse estado o botão do Spotify abre um menu).</summary>
+    /// <summary>Adds to favorites and CONFIRMS it was saved (the button name
+    /// starts mentioning "playlist"). Without confirmation it returns false so the
+    /// caller can fall back to the keyboard shortcut. Does not invoke when already
+    /// saved (in that state Spotify's button opens a menu).</summary>
     public bool AddToFavorites() => DoWithRetry(() =>
     {
         var like = FindLikeButton(FindTrackInfoGroup());
-        if (like == null) return (bool?)null; // contentor obsoleto → repetir após rebuild
+        if (like == null) return (bool?)null; // stale container -> retry after rebuild
 
         string name = like.Current.Name ?? "";
         if (IsLikedName(name))
-            return true; // já está nos favoritos
+            return true; // already in favorites
 
-        // O botão + atual do Spotify tem aria-haspopup, por isso o Chromium só
-        // expõe ExpandCollapse — e Expand() dispara o clique (kDoDefault), que
-        // numa faixa por guardar ADICIONA aos favoritos (verificado ao vivo).
-        // Toggle/Invoke ficam para versões antigas/futuras do Spotify.
+        // Spotify's current + button has aria-haspopup, so Chromium only exposes
+        // ExpandCollapse - and Expand() fires the click (kDoDefault), which on an
+        // unsaved track ADDS to favorites (verified live).
+        // Toggle/Invoke stay for older/future Spotify versions.
         if (like.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out object? expand))
             ((ExpandCollapsePattern)expand).Expand();
         else if (like.TryGetCurrentPattern(TogglePattern.Pattern, out object? toggle))
@@ -180,17 +180,17 @@ public sealed class SpotifyUiaService
         else if (like.TryGetCurrentPattern(InvokePattern.Pattern, out object? invoke))
             ((InvokePattern)invoke).Invoke();
         else
-            return false; // sem padrão utilizável → clique real como recurso
+            return false; // no usable pattern -> real click as the fallback
 
-        // Não esperar pela confirmação aqui: o Spotify demora vários segundos a
-        // atualizar o texto do botão (mesmo com a ação já aplicada), e esperar
-        // segurava o lock. O chamador reconcilia o estado mais tarde.
+        // Do not wait for confirmation here: Spotify takes several seconds to
+        // update the button text (even with the action already applied), and
+        // waiting held the lock. The caller reconciles the state later.
         return true;
     });
 
-    /// <summary>Recurso quando os padrões de acessibilidade falham: restaura a
-    /// janela do Spotify por instantes e faz um clique de rato real no botão de
-    /// favoritos, confirmando o resultado no fim.</summary>
+    /// <summary>Fallback for when the accessibility patterns fail: restores the
+    /// Spotify window briefly and performs a real mouse click on the favorites
+    /// button, confirming the result afterwards.</summary>
     public bool AddToFavoritesByClick()
     {
         if (!Monitor.TryEnter(_lock, TimeSpan.FromSeconds(3)))
@@ -203,7 +203,7 @@ public sealed class SpotifyUiaService
                 var like = FindLikeButton(FindTrackInfoGroup());
                 if (like == null) return false;
                 if (IsLikedName(like.Current.Name ?? ""))
-                    return true; // já está nos favoritos
+                    return true; // already in favorites
 
                 var proc = Process.GetProcessesByName("Spotify")
                     .FirstOrDefault(p => p.MainWindowHandle != IntPtr.Zero);
@@ -220,7 +220,7 @@ public sealed class SpotifyUiaService
                     Interop.SetForegroundWindow(wnd);
                     Thread.Sleep(450);
 
-                    like = FindLikeButton(FindTrackInfoGroup()); // retângulos frescos com a janela visível
+                    like = FindLikeButton(FindTrackInfoGroup()); // fresh rectangles with the window visible
                     if (like == null) return false;
                     var r = like.Current.BoundingRectangle;
                     if (r.IsEmpty) return false;
@@ -255,7 +255,7 @@ public sealed class SpotifyUiaService
         }
     }
 
-    /// <summary>Um clique no botão do Spotify: desligado → aleatório → inteligente → desligado.</summary>
+    /// <summary>One click on Spotify's button: off -> shuffle -> smart -> off.</summary>
     public bool CycleShuffle() => DoWithRetry(() =>
     {
         var shuffle = FindShuffleButton();
@@ -264,7 +264,7 @@ public sealed class SpotifyUiaService
         return true;
     });
 
-    /// <summary>Um clique no botão do Spotify: desligado → playlist → faixa → desligado.</summary>
+    /// <summary>One click on Spotify's button: off -> playlist -> track -> off.</summary>
     public bool CycleRepeat() => DoWithRetry(() =>
     {
         var repeat = FindRepeatCheckbox();
@@ -273,9 +273,9 @@ public sealed class SpotifyUiaService
         return true;
     });
 
-    /// <summary>Executa a ação com os contentores garantidos; se os elementos
-    /// estiverem obsoletos, reconstrói uma vez e tenta de novo. Repõe a janela
-    /// em primeiro plano (os cliques do Chromium podem roubá-la).</summary>
+    /// <summary>Runs the action with the containers guaranteed; if the elements
+    /// are stale, rebuilds once and tries again. Puts the window back in the
+    /// foreground (Chromium clicks can steal it).</summary>
     private bool DoWithRetry(Func<bool?> action)
     {
         if (!Monitor.TryEnter(_lock, TimeSpan.FromSeconds(3)))
@@ -311,11 +311,11 @@ public sealed class SpotifyUiaService
 
     // ---------- Volume ----------
 
-    /// <summary>Volume atual do slider do próprio Spotify, 0..1.</summary>
+    /// <summary>Current volume of Spotify's own slider, 0..1.</summary>
     public double? GetVolume()
     {
-        // Snapshot local do trio (padrão+min+max): um rebuild concorrente podia
-        // emparelhar o padrão novo com limites antigos e dar contas erradas
+        // Local snapshot of the trio (pattern+min+max): a concurrent rebuild could
+        // pair the new pattern with old limits and produce wrong numbers
         var pattern = _volumePattern;
         double min = _volMin, max = _volMax;
         if (pattern != null && max > min)
@@ -334,9 +334,9 @@ public sealed class SpotifyUiaService
             EnsureGroups();
             if (_volumePattern == null)
             {
-                // O Spotify pode recriar SÓ o slider (mudança de dispositivo de
-                // saída) com o resto dos controlos vivo — sem isto, o rebuild
-                // preguiçoso nunca corria e o volume ficava morto para sempre
+                // Spotify can recreate ONLY the slider (output device change)
+                // with the rest of the controls alive - without this, the lazy
+                // rebuild never ran and volume stayed dead forever
                 Invalidate();
                 EnsureGroups();
             }
@@ -355,8 +355,8 @@ public sealed class SpotifyUiaService
         }
     }
 
-    /// <summary>Define o volume no slider do próprio Spotify (a UI dele atualiza), 0..1.
-    /// Caminho rápido fora do lock: chamado repetidamente ao arrastar o slider.</summary>
+    /// <summary>Sets the volume on Spotify's own slider (its UI updates), 0..1.
+    /// Fast path outside the lock: called repeatedly while dragging the slider.</summary>
     public bool SetVolume(double fraction)
     {
         var pattern = _volumePattern;
@@ -373,7 +373,7 @@ public sealed class SpotifyUiaService
             }
             catch
             {
-                _volumePattern = null; // reconstruir abaixo
+                _volumePattern = null; // rebuild below
             }
         }
 
@@ -387,7 +387,7 @@ public sealed class SpotifyUiaService
                 EnsureGroups();
                 if (_volumePattern == null)
                 {
-                    Invalidate(); // slider recriado sozinho — forçar rebuild completo
+                    Invalidate(); // slider recreated on its own - force a full rebuild
                     EnsureGroups();
                 }
                 pattern = _volumePattern;
@@ -412,15 +412,15 @@ public sealed class SpotifyUiaService
         }
     }
 
-    // ---------- Localização dos elementos ----------
+    // ---------- Locating the elements ----------
 
-    // Seleção pela ORDEM DO DOM (FindAll devolve em ordem do documento): imune
-    // aos retângulos obsoletos/vazios de janelas minimizadas. No grupo do título,
-    // o botão de favoritos é o último (capa → links → favoritos); nos controlos,
-    // o aleatório é o primeiro (aleatório → anterior → play → seguinte).
+    // Selection by DOM ORDER (FindAll returns in document order): immune to the
+    // stale/empty rectangles of minimized windows. In the title group the
+    // favorites button is the last one (cover -> links -> favorites); in the
+    // controls, shuffle is the first (shuffle -> previous -> play -> next).
 
-    /// <summary>Grupo do título/artista, derivado FRESCO a cada leitura a partir
-    /// do grupo de controlos (o Spotify recria-o a cada faixa).</summary>
+    /// <summary>Title/artist group, derived FRESH on every read from the controls
+    /// group (Spotify recreates it on every track).</summary>
     private AutomationElement? FindTrackInfoGroup()
     {
         var controls = _controlsGroup;
@@ -488,9 +488,9 @@ public sealed class SpotifyUiaService
         }
     }
 
-    /// <summary>Reconstrução completa. Parte das CHECKBOXES (raras na árvore) em
-    /// vez de percorrer todos os grupos: a checkbox de repetição identifica o
-    /// grupo de controlos (4 botões + 1 checkbox) e daí sai o resto da barra.</summary>
+    /// <summary>Full rebuild. Starts from the CHECKBOXES (rare in the tree)
+    /// instead of walking every group: the repeat checkbox identifies the
+    /// controls group (4 buttons + 1 checkbox) and the rest of the bar follows.</summary>
     private bool FindInWindow(AutomationElement root)
     {
         var checkboxes = root.FindAll(TreeScope.Descendants, CheckBoxCond);
@@ -507,7 +507,7 @@ public sealed class SpotifyUiaService
             var bar = TreeWalker.ControlViewWalker.GetParent(controls);
             if (bar == null) continue;
 
-            // Grupo do título/artista: irmão com hyperlinks e pelo menos um botão
+            // Title/artist group: sibling with hyperlinks and at least one button
             AutomationElement? trackInfo = null;
             var siblings = bar.FindAll(TreeScope.Children, GroupCond);
             foreach (AutomationElement sibling in siblings)
@@ -519,7 +519,7 @@ public sealed class SpotifyUiaService
             }
             if (trackInfo == null) continue;
 
-            // Volume: o slider mais à direita da barra (pré-aquecido para o caminho rápido)
+            // Volume: the rightmost slider on the bar (pre-warmed for the fast path)
             try
             {
                 var sliders = bar.FindAll(TreeScope.Descendants, SliderCond);
@@ -544,7 +544,7 @@ public sealed class SpotifyUiaService
     private static void RestoreForeground(IntPtr before)
     {
         if (before == IntPtr.Zero) return;
-        Thread.Sleep(80); // o roubo de foco do Chromium é assíncrono
+        Thread.Sleep(80); // Chromium's focus stealing is asynchronous
         if (Interop.GetForegroundWindow() != before)
             Interop.SetForegroundWindow(before);
     }

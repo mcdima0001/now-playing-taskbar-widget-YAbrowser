@@ -7,28 +7,28 @@ public sealed record TrackInfo(string Title, string Artist, bool IsPlaying, bool
     TimeSpan Position, TimeSpan Duration, DateTime PositionAtUtc);
 
 /// <summary>
-/// Lê a música atual através da API de media do Windows (SMTC).
-/// O Spotify desktop publica aqui a faixa em reprodução — não é preciso
-/// login nem API do Spotify. Prefere a sessão do Spotify; se não existir,
-/// usa a sessão de media ativa.
+/// Reads the current track through the Windows media API (SMTC).
+/// Spotify desktop publishes the playing track there - no login and no
+/// Spotify API needed. Prefers the Spotify session; without one, follows
+/// the active media session.
 /// </summary>
 public sealed class MediaService
 {
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
     private GlobalSystemMediaTransportControlsSession? _session;
 
-    /// <summary>Disparado (em thread de background) quando a faixa ou o estado mudam.</summary>
+    /// <summary>Fired (on a background thread) when the track or the state changes.</summary>
     public event Action? Changed;
 
-    /// <summary>Disparado só quando a posição/duração mudam — acontece a cada poucos
-    /// segundos, por isso o tratamento tem de ser leve.</summary>
+    /// <summary>Fired only when position/duration change - happens every few
+    /// seconds, so the handler has to stay light.</summary>
     public event Action? TimelineChanged;
 
     public async Task InitializeAsync()
     {
-        // No arranque com o Windows o WinRT pode ainda não estar pronto — uma
-        // falha transitória aqui deixava o widget sem faixa a sessão INTEIRA.
-        // Insistir com recuo (4s→64s, ~2 min) antes de desistir de vez.
+        // When starting with Windows, WinRT may not be ready yet - a transient
+        // failure here left the widget with no track for the WHOLE session.
+        // Retry with backoff (4s->64s, ~2 min) before giving up for good.
         for (int attempt = 0; ; attempt++)
         {
             try
@@ -40,8 +40,8 @@ public sealed class MediaService
             {
                 if (attempt >= 5)
                 {
-                    // Sem a API de sessões de media (edições N sem Media Feature
-                    // Pack, WinRT avariado) — deixar rasto para o report
+                    // No media session API (N editions without the Media Feature
+                    // Pack, broken WinRT) - leave a trace for the report
                     Diag.Once("smtc-init", "Media session API unavailable (this is why nothing shows as playing): " + ex.Message);
                     return;
                 }
@@ -54,8 +54,8 @@ public sealed class MediaService
 
     private readonly object _pickLock = new();
 
-    /// <summary>Dessubscreve tudo — sem isto, uma janela fechada ficava presa
-    /// na memória pelos eventos WinRT e continuava a processar sessões.</summary>
+    /// <summary>Unsubscribes everything - without this a closed window stayed
+    /// pinned in memory by the WinRT events and kept processing sessions.</summary>
     public void Shutdown()
     {
         lock (_pickLock)
@@ -79,6 +79,9 @@ public sealed class MediaService
     {
         if (_manager == null) return;
 
+        // Any player that publishes to SMTC. Spotify wins (it is the only one
+        // with extras through UI Automation); without it, follow the session
+        // Windows considers current and, as a last resort, one that is playing.
         GlobalSystemMediaTransportControlsSession? chosen = null;
         try
         {
@@ -87,6 +90,8 @@ public sealed class MediaService
                 (s.SourceAppUserModelId ?? "").Contains("spotify", StringComparison.OrdinalIgnoreCase));
             if (chosen == null)
             {
+                // GetCurrentSession() is the pick Windows itself makes (the same
+                // one behind the volume flyout) - the scan is only a safety net
                 try { chosen = _manager.GetCurrentSession(); } catch { }
                 chosen ??= sessions.FirstOrDefault(s =>
                 {
@@ -104,9 +109,9 @@ public sealed class MediaService
             Diag.Once("get-sessions", "Reading media sessions failed: " + ex.Message);
         }
 
-        // SessionsChanged chega em threads WinRT em rajadas (arranque/fecho do
-        // Spotify): sem lock, duas trocas entrelaçadas duplicavam subscrições
-        // ou deixavam handlers presos numa sessão morta
+        // SessionsChanged arrives on WinRT threads in bursts (player starting/
+        // closing): without the lock, two interleaved swaps duplicated
+        // subscriptions or left handlers pinned to a dead session
         lock (_pickLock)
         {
             var old = _session;
@@ -147,7 +152,7 @@ public sealed class MediaService
     private void OnTimelineChanged(GlobalSystemMediaTransportControlsSession sender, TimelinePropertiesChangedEventArgs args) =>
         TimelineChanged?.Invoke();
 
-    /// <summary>Leitura rápida da timeline (sem propriedades da faixa nem capa).</summary>
+    /// <summary>Quick timeline read (no track properties and no cover art).</summary>
     public (TimeSpan Position, TimeSpan Duration, bool IsPlaying, DateTime PositionAtUtc)? GetTimeline()
     {
         var s = _session;

@@ -7,19 +7,23 @@ using System.Text.Json;
 namespace SpotifyTaskbarWidget;
 
 /// <summary>
-/// Atualizações via GitHub Releases: compara a versão da release mais recente
-/// com a versão da app; se houver mais recente, descarrega o .exe publicado
-/// como asset e substitui o atual (via script que espera a app fechar).
-///
-/// Para publicar uma atualização:
-///  1. subir <Version> no .csproj e fazer publish;
-///  2. criar uma release no GitHub com tag "vX.Y.Z" e anexar o SpotifyTaskbarWidget.exe.
+/// Updates through GitHub Releases: compares the newest release version with
+/// the app version; if there is a newer one, downloads the published .exe
+/// asset and replaces the current one (through a script that waits for the
+/// app to close).
+/// To publish an update:
+///  1. raise <Version> in the .csproj and publish;
+///  2. create a GitHub release tagged "vX.Y.Z" with SpotifyTaskbarWidget.exe attached.
 /// </summary>
 internal static class UpdateService
 {
+    /// <summary>Automatic updates are OFF in this build. It is a locally
+    /// modified build (any-player support through SMTC): a GitHub update would
+    /// silently replace the exe and undo those changes.
+    /// Setting this to true turns everything below back on.</summary>
     public const bool AutoUpdateEnabled = false;
 
-    // Repositório GitHub "dono/repo" das releases. Com "CHANGEME", a verificação fica desativada.
+    // GitHub "owner/repo" holding the releases. With "CHANGEME" the check is disabled.
     public const string GitHubRepo = "mechanicwb2-hub/spotify-taskbar-widget";
 
     public static bool IsConfigured => AutoUpdateEnabled && !GitHubRepo.Contains("CHANGEME");
@@ -34,7 +38,7 @@ internal static class UpdateService
         using var http = NewClient();
         using var response = await http.GetAsync($"https://api.github.com/repos/{GitHubRepo}/releases/latest");
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            return null; // repositório ainda sem releases — não é um erro
+            return null; // repository has no releases yet - not an error
         response.EnsureSuccessStatusCode();
         string json = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(json);
@@ -42,8 +46,8 @@ internal static class UpdateService
         string tag = doc.RootElement.GetProperty("tag_name").GetString() ?? "";
         if (!Version.TryParse(tag.TrimStart('v', 'V'), out var latest))
         {
-            // Uma tag fora do padrão (ex.: "v1.3.0-fix") cortaria TODA a gente
-            // das atualizações em silêncio — deixar rasto para diagnóstico
+            // A tag off the pattern (e.g. "v1.3.0-fix") would cut EVERYONE off
+            // from updates silently - leave a trace for diagnosis
             Diag.Once("update-tag", "Could not parse the latest release tag as a version: " + tag);
             return null;
         }
@@ -53,8 +57,8 @@ internal static class UpdateService
         foreach (var asset in doc.RootElement.GetProperty("assets").EnumerateArray())
         {
             string name = asset.GetProperty("name").GetString() ?? "";
-            // Nome EXATO: a release também tem o instalador (…-Setup.exe) e
-            // "primeiro .exe" podia apanhá-lo — substituir-nos-íamos pelo setup
+            // EXACT name: the release also carries the installer (...-Setup.exe)
+            // and "first .exe" could grab it - we would replace ourselves with the setup
             if (name.Equals("SpotifyTaskbarWidget.exe", StringComparison.OrdinalIgnoreCase))
                 return (latest, asset.GetProperty("browser_download_url").GetString() ?? "");
         }
@@ -63,18 +67,18 @@ internal static class UpdateService
 
     private static bool _updating;
 
-    /// <summary>Descarrega a nova versão e termina a app; um script substitui o
-    /// exe e reinicia. Endurecido para NUNCA deixar o utilizador sem app:
-    /// valida o download (assinatura MZ + tamanho — um proxy/portal cativo pode
-    /// devolver 200 com HTML), troca via copy+move com retries (antivírus
-    /// seguram ficheiros; o exe antigo nunca é truncado) e, se a troca falhar,
-    /// reinicia o exe antigo intacto. Espera pelo PID com limite (os PIDs são
-    /// reciclados). Script escrito na codepage OEM — o cmd não lê UTF-8 e
-    /// perfis com acentos ("João") davam caminhos estropiados.</summary>
+    /// <summary>Downloads the new version and quits the app; a script swaps the
+    /// exe and restarts it. Hardened to NEVER leave the user without an app:
+    /// validates the download (MZ signature + size - a proxy/captive portal can
+    /// return 200 with HTML), swaps through copy+move with retries (antivirus
+    /// holds files; the old exe is never truncated) and, if the swap fails,
+    /// restarts the old exe intact. Waits for the PID with a limit (PIDs get
+    /// recycled). The script is written in the OEM codepage - cmd does not read
+    /// UTF-8 and profiles with accents ("Joao") produced mangled paths.</summary>
     public static async Task DownloadAndApplyAsync(string url)
     {
-        if (!AutoUpdateEnabled) return;
-        if (_updating) return; // há um item de menu por janela — só um aplica
+        if (!AutoUpdateEnabled) return; // final latch: never replace the exe
+        if (_updating) return; // one menu item per window - only one applies
         _updating = true;
         try
         {

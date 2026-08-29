@@ -3,13 +3,19 @@ using System.Globalization;
 namespace SpotifyTaskbarWidget;
 
 /// <summary>
-/// Textos da interface: português quando o Windows está em PT (PT/BR),
-/// inglês para o resto do mundo.
+/// Interface strings. The language comes from the user setting; on
+/// "automatic" it follows Windows and falls back to English for everything else.
+/// Argument order in <see cref="Pick"/>: en, pt, ru, uk.
+/// The ru/uk translations are machine-made.
 /// </summary>
 internal static class L
 {
+    /// <summary>Supported codes; "" = automatic (follows Windows).</summary>
     public static readonly string[] Codes = { "en", "pt", "ru", "uk" };
 
+    /// <summary>Language in use: the user's choice or, on automatic, the Windows
+    /// one. Read on every access - switching language has to show up without
+    /// restarting the app.</summary>
     public static string Current
     {
         get
@@ -31,7 +37,7 @@ internal static class L
 
     public const string AppTitle = "Taskbar Widget for Spotify";
 
-    // bruh
+    // Language
     public static string LanguageMenu => Pick("Language", "Idioma", "Язык", "Мова");
     public static string LanguageAuto => Pick(
         "Automatic (Windows)", "Automático (Windows)",
@@ -145,7 +151,7 @@ internal static class L
         "Поддержать проект ☕", "Підтримати проєкт ☕");
     public static string Exit => Pick("Quit", "Sair", "Выход", "Вихід");
 
-    // Tooltips / estados
+    // Tooltips / states
     public static string TipPrev => BtnPrev;
     public static string TipPlayPause => BtnPlay;
     public static string TipNext => BtnNext;
@@ -174,7 +180,7 @@ internal static class L
         "nothing playing", "nada a tocar", "ничего не играет", "нічого не грає");
     public static string TipOpenSpotify => OpenSpotify;
 
-
+    // Updates
     public static string UpdateAvailable(Version v) => Pick(
         $"⬤ Update to v{v}", $"⬤ Atualizar para v{v}",
         $"⬤ Обновить до v{v}", $"⬤ Оновити до v{v}");

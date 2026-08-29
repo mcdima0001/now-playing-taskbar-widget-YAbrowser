@@ -5,10 +5,10 @@ namespace SpotifyTaskbarWidget;
 internal static class SpotifyActions
 {
     /// <summary>
-    /// Adiciona/remove a faixa atual dos favoritos enviando o atalho oficial do
-    /// Spotify (Alt+Shift+B) à janela dele. A API de media do Windows não expõe
-    /// "guardar nos favoritos", por isso é preciso dar foco brevemente ao Spotify.
-    /// Correr numa thread de background (usa Sleep).
+    /// Adds/removes the current track from favorites by sending Spotify's
+    /// official shortcut (Alt+Shift+B) to its window. The Windows media API
+    /// does not expose "save to favorites", so Spotify has to be focused
+    /// briefly. Run this on a background thread (it uses Sleep).
     /// </summary>
     public static void LikeCurrentTrack()
     {
@@ -18,7 +18,7 @@ internal static class SpotifyActions
         IntPtr spotify = proc.MainWindowHandle;
         IntPtr previous = Interop.GetForegroundWindow();
 
-        // Minimizada, a janela pode não processar o atalho — restaurar por instantes
+        // While minimized the window may not process the shortcut - restore it briefly
         bool wasMinimized = Interop.IsIconic(spotify);
         if (wasMinimized)
         {
@@ -26,7 +26,7 @@ internal static class SpotifyActions
             Thread.Sleep(250);
         }
 
-        // "Toque" no Alt liberta a restrição do SetForegroundWindow
+        // A "tap" on Alt lifts the SetForegroundWindow restriction
         Interop.keybd_event(Interop.VK_MENU, 0, 0, UIntPtr.Zero);
         Interop.keybd_event(Interop.VK_MENU, 0, Interop.KEYEVENTF_KEYUP, UIntPtr.Zero);
         Interop.SetForegroundWindow(spotify);

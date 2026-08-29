@@ -43,10 +43,10 @@ internal static class Interop
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr FindWindowEx(IntPtr hWndParent, IntPtr hWndChildAfter, string lpszClass, string? lpszWindow);
 
-    /// <summary>Barras de tarefas dos monitores secundários (Win11: Shell_SecondaryTrayWnd),
-    /// ordenadas pela POSIÇÃO do monitor (esquerda→direita, cima→baixo). A enumeração
-    /// crua vem por z-order, que muda a todo o momento — sem ordenação estável,
-    /// "Monitor 2" e "Monitor 3" trocavam de identidade e o widget saltava entre eles.</summary>
+    /// <summary>Taskbars on secondary monitors (Win11: Shell_SecondaryTrayWnd),
+    /// ordered by monitor POSITION (left->right, top->bottom). The raw enumeration
+    /// comes in z-order, which changes constantly - without a stable ordering,
+    /// "Monitor 2" and "Monitor 3" swapped identities and the widget jumped between them.</summary>
     public static List<IntPtr> GetSecondaryTrays()
     {
         var list = new List<(IntPtr Handle, int Left, int Top)>();
@@ -59,7 +59,7 @@ internal static class Interop
         return list.OrderBy(t => t.Left).ThenBy(t => t.Top).Select(t => t.Handle).ToList();
     }
 
-    /// <summary>Limite esquerdo (px físicos) da área de ícones do sistema (relógio, rede…).</summary>
+    /// <summary>Left edge (physical px) of the system icon area (clock, network...).</summary>
     public static int? GetTrayNotifyLeft(IntPtr tray)
     {
         IntPtr notify = FindWindowEx(tray, IntPtr.Zero, "TrayNotifyWnd", null);
@@ -68,12 +68,12 @@ internal static class Interop
         return r.Left;
     }
 
-    /// <summary>Píxeis da barra atualmente dentro do ecrã (para saber se está
-    /// assente, escondida, ou a meio da animação de revelar/esconder).
-    /// Devolve também o fundo do monitor "casa" e o fundo da área de trabalho —
-    /// a diferença entre os dois é a altura REAL desenhada da barra (a reserva
-    /// de appbar), que vale para qualquer altura de barra; com ocultação
-    /// automática não há reserva e o chamador usa a heurística de 48 DIP.</summary>
+    /// <summary>Pixels of the taskbar currently on screen (to tell whether it is
+    /// settled, hidden, or mid reveal/hide animation).
+    /// Also returns the bottom of the "home" monitor and the bottom of the work
+    /// area - the difference between the two is the REAL drawn height of the bar
+    /// (the appbar reservation), valid for any bar height; with auto-hide there is
+    /// no reservation and the caller falls back to the 48 DIP heuristic.</summary>
     public static int GetTaskbarVisiblePx(RECT trayRect, out int monitorBottomPx, out int workAreaBottomPx)
     {
         IntPtr mon = GetTrayMonitor(trayRect);
@@ -82,7 +82,7 @@ internal static class Interop
         {
             monitorBottomPx = trayRect.Bottom;
             workAreaBottomPx = trayRect.Bottom;
-            return trayRect.Bottom - trayRect.Top; // sem info: assumir assente
+            return trayRect.Bottom - trayRect.Top; // no info: assume settled
         }
         monitorBottomPx = mi.rcMonitor.Bottom;
         workAreaBottomPx = mi.rcWork.Bottom;
@@ -103,15 +103,15 @@ internal static class Interop
     [DllImport("user32.dll")]
     private static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
 
-    // Estado de recorte POR JANELA: há um widget por monitor, e uma flag única
-    // fazia uma janela "consumir" a remoção do recorte da outra — o widget
-    // ficava truncado/invisível para sempre no outro monitor
+    // Clipping state PER WINDOW: there is one widget per monitor, and a single
+    // flag made one window "consume" the other's clip removal - the widget
+    // stayed truncated/invisible forever on the other monitor
     private static readonly HashSet<IntPtr> _clippedWindows = new();
 
-    /// <summary>Recorta a janela ao que cabe acima do fundo do ecrã enquanto a
-    /// barra desliza (ocultação automática). Sem recorte, a parte que já "saiu"
-    /// continuava a desenhar-se — visível num monitor disposto abaixo.
-    /// O sistema fica dono da região após SetWindowRgn (não a libertar).</summary>
+    /// <summary>Clips the window to what fits above the bottom of the screen while
+    /// the taskbar slides (auto-hide). Without clipping, the part that already
+    /// "left" kept drawing - visible on a monitor arranged below.
+    /// The system owns the region after SetWindowRgn (do not free it).</summary>
     public static void ClipWindowBottom(IntPtr hwnd, int widthPx, int heightPx, int visibleHeightPx)
     {
         if (visibleHeightPx >= heightPx)
@@ -165,10 +165,10 @@ internal static class Interop
     [DllImport("shell32.dll")]
     private static extern UIntPtr SHAppBarMessage(uint dwMessage, ref APPBARDATA pData);
 
-    /// <summary>True se a ocultação automática da barra estiver ativa. Nesse modo,
-    /// as janelas maximizadas ocupam o ecrã todo e "parecem" fullscreen — o teste
-    /// de ecrã inteiro deixa de ser fiável (e é redundante: a visibilidade do
-    /// widget já segue a da barra).</summary>
+    /// <summary>True if taskbar auto-hide is on. In that mode maximized windows
+    /// cover the whole screen and "look" fullscreen - the fullscreen test stops
+    /// being reliable (and is redundant: the widget's visibility already follows
+    /// the bar's).</summary>
     public static bool IsAutoHideEnabled()
     {
         var data = new APPBARDATA { cbSize = (uint)Marshal.SizeOf<APPBARDATA>() };
@@ -189,10 +189,10 @@ internal static class Interop
     [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
 
-    /// <summary>Monitor "casa" da barra de tarefas. Com ocultação automática, o
-    /// rect da barra desliza para FORA do ecrã — se houver um monitor disposto
-    /// abaixo, MonitorFromWindow devolve esse vizinho e as contas de visibilidade
-    /// saem contra o ecrã errado. O ponto logo acima da barra não sofre disso.</summary>
+    /// <summary>The taskbar's "home" monitor. With auto-hide the bar's rect slides
+    /// OFF screen - if a monitor is arranged below, MonitorFromWindow returns that
+    /// neighbour and the visibility maths run against the wrong screen. The point
+    /// just above the bar does not suffer from that.</summary>
     private static IntPtr GetTrayMonitor(RECT trayRect)
     {
         var pt = new POINT { X = (trayRect.Left + trayRect.Right) / 2, Y = trayRect.Top - 10 };
@@ -227,16 +227,16 @@ internal static class Interop
 
     private const uint SWP_NOZORDER = 0x0004;
 
-    /// <summary>Move a janela para coordenadas FÍSICAS (px). Posicionar em px puros
-    /// evita as contas erradas de DIP entre monitores com escalas diferentes.</summary>
+    /// <summary>Moves the window to PHYSICAL coordinates (px). Positioning in raw px
+    /// avoids the wrong DIP maths between monitors with different scaling.</summary>
     public static void MoveWindowTo(IntPtr hwnd, int xPx, int yPx) =>
         SetWindowPos(hwnd, IntPtr.Zero, xPx, yPx, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 
     [DllImport("user32.dll")]
     public static extern uint GetDpiForWindow(IntPtr hWnd);
 
-    // Hook de eventos do sistema: reagir no instante em que a janela ativa muda
-    // (clicar na taskbar traz a barra para cima do widget até re-afirmarmos)
+    // System event hook: react the instant the active window changes
+    // (clicking the taskbar brings the bar above the widget until we re-assert)
     public delegate void WinEventDelegate(IntPtr hWinEventHook, uint eventType, IntPtr hwnd,
         int idObject, int idChild, uint dwEventThread, uint dwmsEventTime);
 
@@ -251,8 +251,8 @@ internal static class Interop
     public const uint WINEVENT_OUTOFCONTEXT = 0x0000;
 
     /// <summary>
-    /// True se a janela em primeiro plano estiver em ecrã inteiro no mesmo monitor
-    /// da barra de tarefas (jogos, vídeos) — nesse caso o widget deve esconder-se.
+    /// True if the foreground window is fullscreen on the same monitor as the
+    /// taskbar (games, videos) - in that case the widget should hide.
     /// </summary>
     public static bool IsForegroundFullscreen(IntPtr self, IntPtr tray)
     {
@@ -286,11 +286,11 @@ internal static class Interop
         if (!coversMonitor)
             return false;
 
-        // Cobre o ecrã todo. Estas classes servem tanto overlays inofensivos da
-        // shell (menu Iniciar, emojis/ditado, recorte de ecrã) como jogos UWP em
-        // ecrã inteiro (Forza da Store, issue #5) — distinguir pelo processo.
-        // Só AQUI se paga o lookup de processo: janelas que não cobrem o ecrã
-        // nunca chegam cá (antes corria para qualquer app UWP em foco).
+        // Covers the whole screen. These classes serve both harmless shell overlays
+        // (Start menu, emoji/dictation, screen snip) and fullscreen UWP games
+        // (Store Forza, issue #5) - tell them apart by the process.
+        // The process lookup is paid ONLY here: windows that do not cover the
+        // screen never reach this point (it used to run for any focused UWP app).
         if (cls is "Windows.UI.Core.CoreWindow" or "ApplicationFrameWindow")
         {
             GetWindowThreadProcessId(fg, out uint pid);
@@ -304,7 +304,7 @@ internal static class Interop
             }
             catch
             {
-                return false; // processo já morreu: tratar como shell (inócuo)
+                return false; // process already died: treat as shell (harmless)
             }
         }
 

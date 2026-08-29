@@ -7,8 +7,8 @@ public partial class App : Application
 {
     private static Mutex? _mutex;
 
-    /// <summary>True apenas quando o utilizador saiu de propósito (ou update);
-    /// false quando a janela morre com o Explorer e deve ser recriada.</summary>
+    /// <summary>True only when the user quit on purpose (or an update);
+    /// false when the window dies with Explorer and must be recreated.</summary>
     public static bool IntentionalExit;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -21,28 +21,28 @@ public partial class App : Application
             return;
         }
 
-        // A janela pode ser destruída por um reinício do Explorer (é owned pela
-        // taskbar) e recriada — a app só termina quando o utilizador manda
+        // The window can be destroyed by an Explorer restart (it is owned by
+        // the taskbar) and recreated - the app only exits when the user says so
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
         DispatcherUnhandledException += (_, args) =>
         {
-            // Escrita partilhada com o Diag: dedup de repetições (um timer em
-            // erro dispara várias vezes por segundo) e teto de tamanho
+            // Shared writing with Diag: dedup of repeats (a timer stuck in an
+            // error fires several times a second) and a size ceiling
             Diag.Log(args.Exception.ToString());
             args.Handled = true;
         };
 
         base.OnStartup(e);
 
-        // Uma janela de widget por barra selecionada nas definições
+        // One widget window per taskbar selected in the settings
         SpotifyTaskbarWidget.MainWindow.SyncToMonitors();
 
-        // Se NENHUMA janela se conseguiu criar (crash no arranque numa certa
-        // máquina), sair de forma limpa em vez de ficar um processo zombie —
-        // sem UI nem ícone de bandeja — a segurar o mutex de instância única e
-        // a impedir novas tentativas de abrir (crítica "flashes then does not
-        // load"). O log fica com a exceção para diagnóstico.
+        // If NO window could be created (startup crash on a particular
+        // machine), exit cleanly instead of leaving a zombie process -
+        // no UI, no tray icon - holding the single-instance mutex and
+        // blocking further attempts to open it (the "flashes then does not
+        // load" complaint). The log keeps the exception for diagnosis.
         if (!SpotifyTaskbarWidget.MainWindow.HasWindows)
         {
             Diag.Log("No widget window could be created at startup — exiting so the single-instance mutex is released.");
