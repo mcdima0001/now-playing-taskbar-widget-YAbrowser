@@ -1,0 +1,44 @@
+name: Сборка установщика
+
+# Тег вида v1.3.0 собирает установщик и прикладывает его к релизу.
+# Ручной запуск (workflow_dispatch) собирает и кладёт файл в артефакты -
+# удобно проверить сборку, ничего не публикуя.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # Только Windows: WPF на других системах не собирается
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Сборка виджета
+        run: dotnet publish SpotifyTaskbarWidget.csproj -c Release -o publish
+
+      - name: Установка Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Сборка установщика
+        run: '& "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe" setup.iss'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: installer/*.exe
+
+      - name: Публикация релиза
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/*.exe
+          generate_release_notes: true
