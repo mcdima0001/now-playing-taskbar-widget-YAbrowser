@@ -39,6 +39,13 @@ jobs:
           name: installer
           path: installer/*.exe
 
+      # Отдельно - голый exe: им удобно обновить уже установленный виджет,
+      # не гоняя установщик
+      - uses: actions/upload-artifact@v4
+        with:
+          name: widget-exe
+          path: publish/SpotifyTaskbarWidget.exe
+
       - name: Публикация релиза
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2

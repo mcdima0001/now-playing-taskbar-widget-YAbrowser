@@ -1,12 +1,20 @@
 // Собирает состояния со всех вкладок, выбирает текущую и держит WebSocket
 // к виджету. Порт слушает только 127.0.0.1, наружу ничего не уходит.
 const PORT = 45219;
-const STALE_MS = 8000;
+const STALE_MS = 30000;
+// Как часто сами спрашиваем вкладку о состоянии. Пульс из вкладки не годится:
+// браузер душит таймеры фоновой страницы, как только она замолкает, и на паузе
+// отчёты приходят раз в минуту - виджет за это время успевает погаснуть
+const PULL_MS = 4000;
+// Вкладка может быть заморожена (экономия памяти) и не отвечать на опрос -
+// это ещё не повод её хоронить, ждём минуту
+const SILENCE_MS = 60000;
 
 const tabs = new Map(); // "tabId:frameId" -> { state, ts, tabId, frameId }
 let ws = null;
 let retry = 1000;
 let lastSentKey = '';
+let pullTimer = null;
 
 function idOf(sender) {
   return `${sender.tab ? sender.tab.id : 0}:${sender.frameId || 0}`;
@@ -45,6 +53,35 @@ function push(force) {
   }
   lastSentKey = key;
   ws.send(JSON.stringify({ type: 'state', ...s, ts: Date.now() }));
+}
+
+// Спрашиваем каждую известную вкладку напрямую: доставку сообщений throttling
+// не трогает, в отличие от таймеров внутри страницы. Ответ вкладка присылает
+// обычным state-сообщением, поэтому здесь важен только сам факт отказа
+async function pull() {
+  if (!tabs.size) return;
+  const now = Date.now();
+  for (const [k, v] of [...tabs]) {
+    try {
+      await chrome.tabs.sendMessage(v.tabId, { cmd: 'ping' }, { frameId: v.frameId });
+      v.silentSince = 0;
+    } catch {
+      // Вкладки нет - забываем сразу; есть, но молчит - даём ей минуту
+      let gone = false;
+      try { await chrome.tabs.get(v.tabId); } catch { gone = true; }
+      if (!gone) {
+        if (!v.silentSince) v.silentSince = now;
+        if (now - v.silentSince < SILENCE_MS) continue;
+      }
+      tabs.delete(k);
+      push(true);
+    }
+  }
+}
+
+function startPull() {
+  if (pullTimer) return;
+  pullTimer = setInterval(pull, PULL_MS);
 }
 
 function connect() {
@@ -102,6 +139,7 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
       frameId: sender.frameId || 0,
     });
     connect();
+    startPull();
     push(false);
   }
   return false;
@@ -114,7 +152,7 @@ chrome.tabs.onRemoved.addListener(tabId => {
 
 // Service worker засыпает; будильник поднимает его и восстанавливает сокет
 chrome.alarms.create('keepalive', { periodInMinutes: 0.5 });
-chrome.alarms.onAlarm.addListener(() => connect());
+chrome.alarms.onAlarm.addListener(() => { connect(); startPull(); pull(); });
 // Контент-скрипты из манифеста попадают только во вкладки, открытые ПОСЛЕ
 // установки. Вкладку с музыкой пользователь открыл раньше - доинжектим сами,
 // иначе расширение молчит до перезагрузки страницы
@@ -133,4 +171,5 @@ async function injectAll() {
 chrome.runtime.onStartup.addListener(() => { connect(); injectAll(); });
 chrome.runtime.onInstalled.addListener(() => { connect(); injectAll(); });
 connect();
+startPull();
 injectAll();

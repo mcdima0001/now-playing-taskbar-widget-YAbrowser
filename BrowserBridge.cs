@@ -42,8 +42,15 @@ public sealed class BrowserBridge
     /// <summary>Пришла только новая позиция - обработчик должен быть лёгким.</summary>
     public event Action? TimelineChanged;
 
-    /// <summary>Последнее состояние; null, если браузер молчит дольше 10 секунд
-    /// (расширение шлёт пульс раз в 3 секунды).</summary>
+    /// <summary>Состояние на паузе живёт, пока держится соединение: браузер
+    /// душит таймеры в замолчавшей фоновой вкладке, и отчёты оттуда приходят
+    /// раз в минуту - виджет от таймаута мигал. Признак живости честнее -
+    /// открытый сокет, при его закрытии состояние обнуляется.</summary>
+    private static readonly TimeSpan PlayingTtl = TimeSpan.FromSeconds(30);
+
+    /// <summary>Последнее состояние; играющий трек без отчётов дольше
+    /// <see cref="PlayingTtl"/> считается брошенным - звучащую вкладку браузер
+    /// не душит, значит замолчал сам источник.</summary>
     public BrowserState? Current
     {
         get
@@ -51,7 +58,8 @@ public sealed class BrowserBridge
             lock (_gate)
             {
                 if (_state == null) return null;
-                return DateTime.UtcNow - _state.At > TimeSpan.FromSeconds(10) ? null : _state;
+                if (!_state.Playing) return _state;
+                return DateTime.UtcNow - _state.At > PlayingTtl ? null : _state;
             }
         }
     }

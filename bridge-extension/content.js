@@ -281,6 +281,18 @@
   }
 
   chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
+    // Опрос от фонового скрипта. Нужен потому, что браузер душит таймеры в
+    // фоновой вкладке, как только она перестаёт звучать: на паузе tick()
+    // начинает срабатывать раз в минуту. Обработчики сообщений throttling не
+    // касается, поэтому состояние берётся опросом, а не пульсом
+    if (msg && msg.cmd === 'ping') {
+      const cur = snapshot();
+      if (cur) { lastKey = key(cur); send(cur, 'ping'); }
+      else if (lastKey) { lastKey = ''; try { chrome.runtime.sendMessage({ type: 'gone' }); } catch {} }
+      respond && respond({ ok: true, alive: !!cur });
+      return false;
+    }
+
     const el = pickMedia();
     const c = controls();
     if (msg && msg.cmd === 'playpause') {
@@ -305,6 +317,13 @@
     if (s) { lastKey = key(s); send(s, 'cmd'); }
     respond && respond({ ok: true });
     return false;
+  });
+
+  // Переход на другую страницу убивает наш таймер молча - предупреждаем сами,
+  // иначе фоновый скрипт будет ещё минуту опрашивать мёртвую вкладку
+  addEventListener('pagehide', () => {
+    stop();
+    try { chrome.runtime.sendMessage({ type: 'gone' }); } catch {}
   });
 
   timer = setInterval(tick, TICK_MS);
