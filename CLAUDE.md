@@ -53,3 +53,21 @@ dotnet publish SpotifyTaskbarWidget.csproj -c Release -o out
 ```
 
 Нужен .NET SDK 8 и Windows: WPF на Linux не собирается.
+
+## Установщик и релизы
+
+`setup.iss` собирает Inno Setup 6 в один exe: виджет, расширение рядом в
+`bridge-extension` и автозагрузка .NET 8, если его нет. Ставится в профиль
+пользователя (`PrivilegesRequired=lowest`), UAC не спрашивает.
+
+Выпуск: `git tag vX.Y.Z && git push fork vX.Y.Z`. Дальше `.github/workflows/release.yml`
+собирает на windows-раннере и сам прикладывает exe к релизу; пуш в `main`
+собирает то же самое в артефакты, чтобы поломка была видна сразу.
+
+Грабли установщика:
+
+- **`{app}` в `InitializeWizard` ещё не раскрыт** — обращение к нему валит
+  установщик молча. Тексты страниц ставить в `CurPageChanged`.
+- **Никакого `taskkill` в `[UninstallRun]`**: удаление одной копии убивало
+  работающий виджет пользователя. Закрытие делает Restart Manager
+  (`CloseApplications=yes`).
