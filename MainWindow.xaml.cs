@@ -199,6 +199,12 @@ public partial class MainWindow : Window
             _hwnd, SnapHotkeyId,
             Interop.MOD_CONTROL | Interop.MOD_ALT | Interop.MOD_NOREPEAT,
             Interop.VK_OEM_PERIOD);
+        // Клавишу мог занять кто-то другой - молчать об этом нельзя, иначе
+        // непонятно, почему нажатие ничего не делает
+        if (!_hotkeyOwner && Instances.Count == 1)
+            Diag.Once("hotkey-busy",
+                "Ctrl+Alt+. is taken by another app - the snap-back hotkey is off " +
+                "(the context menu item still works).");
     }
 
     private IntPtr HotkeyHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -230,11 +236,40 @@ public partial class MainWindow : Window
         MoveMenu.IsChecked = false;
         _moveMode = false;
         Root.Cursor = Cursors.Hand;
-        // Забыть прочитанные якоря: следующий опрос возьмёт свежие
-        _widgetsRightPx = null;
-        _startLeftPx = null;
         _anchorsMissingSince = DateTime.MinValue;
+        ForceAnchorRead();
         UpdatePosition();
+    }
+
+    /// <summary>Читает якоря прямо сейчас, не дожидаясь фонового опроса. Ждать
+    /// нельзя: если точное чтение не удаётся (кнопка погоды отдаёт границы, в
+    /// которые её содержимое не попадает), опрос будет проваливаться сколько
+    /// угодно долго, а нажатие обязано сработать сразу. Поэтому при неудаче
+    /// берём внешние границы кнопок.</summary>
+    private void ForceAnchorRead()
+    {
+        IntPtr tray = GetTargetTray();
+        if (tray == IntPtr.Zero) return;
+
+        bool full = IsTaskbarLeftAligned();
+        var (ok, widgetsRight, startLeft, taskButtonsRight) = TaskbarAnchors.Get(tray, full);
+        if (!ok)
+        {
+            var outer = TaskbarAnchors.Outer(tray);
+            widgetsRight = outer.widgetsRight;
+            startLeft = outer.startLeft;
+            taskButtonsRight = null;
+            Diag.Once("snap-outer", "Anchor content unreadable; snapped to the outer button edges.");
+        }
+        if (!widgetsRight.HasValue && !startLeft.HasValue) return;
+
+        lock (_anchorLock)
+        {
+            _widgetsRightPx = widgetsRight;
+            _startLeftPx = startLeft;
+            if (full && taskButtonsRight.HasValue) _taskEndPx = taskButtonsRight;
+            _anchorsTray = tray;
+        }
     }
 
     /// <summary>Applies the strings in the selected language.</summary>

@@ -70,6 +70,35 @@ internal static class TaskbarAnchors
         }
     }
 
+    /// <summary>Грубые границы кнопок - внешние прямоугольники, без уточнения
+    /// по содержимому. Запасной вариант для ручного «поставь на место»: точное
+    /// чтение может не удаваться сколько угодно долго, а команда пользователя
+    /// обязана сработать сразу, пусть и с небольшой лишней щелью справа от
+    /// погоды.</summary>
+    public static (double? widgetsRight, double? startLeft) Outer(IntPtr tray)
+    {
+        try
+        {
+            var (widgets, start) = Buttons(tray);
+            double? wr = null, sl = null;
+            if (widgets != null)
+            {
+                var r = widgets.Current.BoundingRectangle;
+                if (!r.IsEmpty) wr = r.Right;
+            }
+            if (start != null)
+            {
+                var r = start.Current.BoundingRectangle;
+                if (!r.IsEmpty) sl = r.Left;
+            }
+            return (wr, sl);
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
     /// <param name="includeTaskButtons">Обход всех кнопок панели стоит дорого и
     /// нужен только правой привязке (лево-выровненные значки). Для обычного
     /// случая его пропускаем, чтобы опрашивать якоря часто и без нагрузки.</param>
