@@ -211,6 +211,7 @@ public partial class MainWindow : Window
     {
         if (msg == Interop.WM_HOTKEY && wParam.ToInt32() == SnapHotkeyId)
         {
+            Diag.Once("snap-hotkey", "Snap-back hotkey pressed - repositioning.");
             SnapAllBack();
             handled = true;
         }
@@ -2269,6 +2270,7 @@ public partial class MainWindow : Window
     {
         // Restores the automatic POSITIONS on every bar; the monitor selection
         // stays as it is (clearing it destroyed the user's choice)
+        Diag.Once("snap-menu", "Snap-back menu item used - repositioning.");
         SnapAllBack();
     }
 

@@ -142,7 +142,18 @@ internal static class TaskbarAnchors
                     var found = widgets.FindAll(TreeScope.Descendants, new OrCondition(
                         new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text),
                         new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Image)));
-                    double? contentRight = null;
+
+                    // В кнопке погоды лежат ОБЕ карточки сразу - показанная и
+                    // следующая ("32°C Sunny" и "Temps to rise"), на одной
+                    // высоте и обе не помечены как скрытые. По геометрии их не
+                    // различить, и виджет вставал по самой широкой - отсюда
+                    // дыра слева. Зато имя самой кнопки собрано из видимой
+                    // карточки ("Погода 32°C Sunny"), по нему и отбираем.
+                    string shown = "";
+                    try { shown = widgets.Current.Name ?? ""; } catch { }
+
+                    double? contentRight = null;   // по видимой карточке
+                    double? anyRight = null;       // по всему подряд - запасной
                     foreach (AutomationElement el in found)
                     {
                         // Элемент может исчезнуть посреди обхода (погода
@@ -151,10 +162,22 @@ internal static class TaskbarAnchors
                         {
                             var er = el.Current.BoundingRectangle;
                             if (er.IsEmpty) continue;
+                            if (anyRight is not double any || er.Right > any) anyRight = er.Right;
+
+                            string text = el.Current.Name ?? "";
+                            // Текст не из имени кнопки - это невидимая карточка.
+                            // Значки имени не имеют и в отборе не участвуют:
+                            // они всё равно слева и на правый край не влияют
+                            if (text.Length > 0 && shown.Length > 0 &&
+                                !shown.Contains(text, StringComparison.Ordinal))
+                                continue;
                             if (contentRight is not double cur || er.Right > cur) contentRight = er.Right;
                         }
                         catch { }
                     }
+                    // Имя кнопки не совпало ни с одним текстом (другой язык,
+                    // другая вёрстка) - лучше прежнее поведение, чем ничего
+                    contentRight ??= anyRight;
                     // Доверяем только значению внутри кнопки: чужой элемент или
                     // мусорный прямоугольник не должны утащить виджет
                     if (contentRight is double cr && cr > r.Left && cr < r.Right)
