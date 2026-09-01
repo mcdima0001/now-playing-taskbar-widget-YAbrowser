@@ -1,11 +1,12 @@
 name: Сборка установщика
 
 # Тег вида v1.3.0 собирает установщик и прикладывает его к релизу.
-# Ручной запуск (workflow_dispatch) собирает и кладёт файл в артефакты -
-# удобно проверить сборку, ничего не публикуя.
+# Пуш в ветку собирает то же самое, но только кладёт файл в артефакты - так
+# поломка сборки видна сразу, а не в момент выпуска.
 on:
   push:
     tags: ["v*"]
+    branches: [browser-bridge]
   workflow_dispatch:
 
 permissions:
@@ -29,7 +30,9 @@ jobs:
         run: choco install innosetup --no-progress -y
 
       - name: Сборка установщика
-        run: '& "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe" setup.iss'
+        # Скобки обязательны: $env:ProgramFiles(x86) PowerShell читает как
+        # переменную ProgramFiles и текст "(x86)" следом
+        run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" setup.iss'
 
       - uses: actions/upload-artifact@v4
         with:
