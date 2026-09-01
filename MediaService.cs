@@ -49,6 +49,10 @@ public sealed class MediaService
             }
         }
         _manager.SessionsChanged += (_, _) => PickSession();
+        // Без этого смена "текущей" сессии проходила мимо: список сессий
+        // не менялся (вкладка/плеер уже были открыты), SessionsChanged молчал,
+        // и виджет оставался привязан к прежней сессии
+        _manager.CurrentSessionChanged += (_, _) => PickSession();
         PickSession();
     }
 
@@ -90,10 +94,10 @@ public sealed class MediaService
                 (s.SourceAppUserModelId ?? "").Contains("spotify", StringComparison.OrdinalIgnoreCase));
             if (chosen == null)
             {
-                // GetCurrentSession() is the pick Windows itself makes (the same
-                // one behind the volume flyout) - the scan is only a safety net
-                try { chosen = _manager.GetCurrentSession(); } catch { }
-                chosen ??= sessions.FirstOrDefault(s =>
+                // Реально играющая сессия важнее "текущей" по версии Windows:
+                // текущей вполне может остаться давно поставленный на паузу плеер,
+                // и тогда виджет показывал его вместо того, что звучит
+                chosen = sessions.FirstOrDefault(s =>
                 {
                     try
                     {
@@ -101,7 +105,14 @@ public sealed class MediaService
                                GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
                     }
                     catch { return false; }
-                }) ?? sessions.FirstOrDefault();
+                });
+                if (chosen == null)
+                {
+                    // Ничего не играет - берём выбор самой Windows (та же сессия,
+                    // что за плашкой громкости), список как последний резерв
+                    try { chosen = _manager.GetCurrentSession(); } catch { }
+                    chosen ??= sessions.FirstOrDefault();
+                }
             }
         }
         catch (Exception ex)
@@ -151,6 +162,17 @@ public sealed class MediaService
 
     private void OnTimelineChanged(GlobalSystemMediaTransportControlsSession sender, TimelinePropertiesChangedEventArgs args) =>
         TimelineChanged?.Invoke();
+
+    /// <summary>Идентификатор приложения текущей сессии (AUMID). По нему
+    /// находится окно источника, чтобы показать его по клику.</summary>
+    public string? SourceAppId
+    {
+        get
+        {
+            try { return _session?.SourceAppUserModelId; }
+            catch { return null; }
+        }
+    }
 
     /// <summary>Quick timeline read (no track properties and no cover art).</summary>
     public (TimeSpan Position, TimeSpan Duration, bool IsPlaying, DateTime PositionAtUtc)? GetTimeline()

@@ -95,6 +95,28 @@ internal static class Interop
     [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
+    // Перебор окон нужен, чтобы найти приложение-источник звука по его
+    // идентификатору из системной сессии (SMTC отдаёт только строку AUMID)
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    public static extern int GetWindowTextLength(IntPtr hWnd);
+
+    /// <summary>Владелец окна: у диалогов и всплывашек он есть, у главного
+    /// окна приложения - нет.</summary>
+    public const uint GW_OWNER = 4;
+
+    public const int SW_SHOW = 5;
+
     public const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
 
     [DllImport("gdi32.dll")]
@@ -218,6 +240,14 @@ internal static class Interop
 
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    /// <summary>Разрешает другому процессу вывести своё окно вперёд. Без этого
+    /// Windows не даёт браузеру подняться по команде извне - окно только мигает
+    /// на панели задач. ASFW_ANY снимает ограничение для любого процесса.</summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool AllowSetForegroundWindow(int dwProcessId);
+
+    public const int ASFW_ANY = -1;
 
     [DllImport("user32.dll")]
     public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);

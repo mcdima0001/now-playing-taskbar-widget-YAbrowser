@@ -218,7 +218,7 @@
     </Window.Resources>
 
     <!-- Almost transparent background (#01000000) so the mouse is detected (menu/move) -->
-    <Border x:Name="Root" Background="#01000000" CornerRadius="8" Padding="8,2,8,0" Cursor="Hand"
+    <Border x:Name="Root" Background="#01000000" CornerRadius="8" Padding="8,2,0,0" Cursor="Hand"
             MouseLeftButtonDown="Root_MouseLeftButtonDown"
             MouseMove="Root_MouseMove"
             MouseLeftButtonUp="Root_MouseLeftButtonUp"
@@ -344,15 +344,37 @@
                     <!-- Canvas: measures the child with infinite space, so the title
                          ALWAYS renders in full (the Grid cropped it to the cell
                          width and the marquee slid text that was already truncated) -->
-                    <Canvas x:Name="TitleClip" ClipToBounds="True" Height="16">
-                        <TextBlock x:Name="TitleText" Text="Spotify" Foreground="White"
-                                   FontWeight="SemiBold" FontSize="12"
-                                   Canvas.Left="0" Canvas.Top="0">
-                            <TextBlock.RenderTransform>
-                                <TranslateTransform x:Name="TitleShift"/>
-                            </TextBlock.RenderTransform>
-                        </TextBlock>
-                    </Canvas>
+                    <Grid Height="16">
+                        <Grid.ColumnDefinitions>
+                            <!-- Ширину названия задаёт код: колонка ужимается до
+                                 самого текста, чтобы значок стоял вплотную за ним,
+                                 а не улетал к правому краю на коротких названиях -->
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Canvas x:Name="TitleClip" Grid.Column="0" ClipToBounds="True">
+                            <TextBlock x:Name="TitleText" Text="Spotify" Foreground="White"
+                                       FontWeight="SemiBold" FontSize="12"
+                                       Canvas.Left="0" Canvas.Top="0">
+                                <TextBlock.RenderTransform>
+                                    <TranslateTransform x:Name="TitleShift"/>
+                                </TextBlock.RenderTransform>
+                            </TextBlock>
+                        </Canvas>
+                        <!-- Пометка о ненормативной лексике. Весь значок - один
+                             контур: кольцо, палочка и точка в одной геометрии с
+                             чётным правилом заливки. Собранный из отдельных фигур
+                             он терял центровку - при масштабе 125% позиции
+                             округляются каждая по-своему -->
+                        <Path x:Name="ExplicitBadge" Grid.Column="1" Width="12" Height="12"
+                              Margin="5,0,0,0" VerticalAlignment="Center"
+                              Stretch="Uniform" Fill="#B3B3B3"
+                              Visibility="Collapsed" ToolTip="Ненормативная лексика"
+                              Data="F0 M8,0 A8,8 0 1 1 7.99,0 Z
+                                    M8,1.5 A6.5,6.5 0 1 0 8.01,1.5 Z
+                                    M7.22,4 h1.8 v5.5 h-1.8 Z
+                                    M8.12,11.4 m-1.05,0 a1.05,1.05 0 1 0 2.1,0 a1.05,1.05 0 1 0 -2.1,0 Z"/>
+                    </Grid>
                     <TextBlock x:Name="ArtistText" Text="nothing playing" Foreground="#B3B3B3"
                                FontSize="11" TextTrimming="CharacterEllipsis"/>
                 </StackPanel>
@@ -432,8 +454,21 @@
                     Background="#33FFFFFF" Margin="1,2,1,3" Cursor="Hand"
                     MouseLeftButtonDown="Progress_MouseLeftButtonDown"
                     MouseEnter="Progress_MouseEnter" MouseLeave="Progress_MouseLeave">
+                <!-- Заполнение тянется масштабом, а не шириной: ширина проходит
+                     через раскладку и округляется до целых пикселей, отчего
+                     полоса дёргалась на пиксель раз в полсекунды -->
+                <!-- Растянуто на всю дорожку и ужимается масштабом. Задавать
+                     ширину числом нельзя: заполнение лежит внутри дорожки, его
+                     ширина увеличивала бы желаемую ширину окна, а окно
+                     SizeToContent - получалась бы петля с ростом до бесконечности -->
                 <Border x:Name="ProgressFill" CornerRadius="1.5" Background="White"
-                        HorizontalAlignment="Left" Width="0"/>
+                        HorizontalAlignment="Stretch"
+                        UseLayoutRounding="False" SnapsToDevicePixels="False"
+                        RenderTransformOrigin="0,0.5">
+                    <Border.RenderTransform>
+                        <ScaleTransform x:Name="ProgressScale" ScaleX="0"/>
+                    </Border.RenderTransform>
+                </Border>
             </Border>
 
             <!-- Horizontal Spotify-style volume slider -->

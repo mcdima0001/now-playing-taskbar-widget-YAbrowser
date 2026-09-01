@@ -11,6 +11,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Microsoft.Win32;
 
+
 namespace SpotifyTaskbarWidget;
 
 public partial class MainWindow : Window
@@ -34,7 +35,7 @@ public partial class MainWindow : Window
     private Brush _progressFillNormal = Brushes.White;
     private bool? _lightTheme;
 
-    private readonly MediaService _media = new();
+    private readonly MediaHub _media = new();
     private readonly SpotifyUiaService _uia = new();
     private readonly WidgetSettings _settings = WidgetSettings.Shared;
     private bool? _liked;
@@ -86,7 +87,10 @@ public partial class MainWindow : Window
             win._trayCache = IntPtr.Zero;
     }
 
-    private readonly DispatcherTimer _positionTimer = new() { Interval = TimeSpan.FromMilliseconds(600) };
+    // 200 мс - это и есть частота слежения за якорями панели: сам опрос UIA
+    // вызывается изнутри UpdatePosition и чаще этого тика случиться не может.
+    // Классических WinEvent для XAML-панели Windows 11 не присылает
+    private readonly DispatcherTimer _positionTimer = new() { Interval = TimeSpan.FromMilliseconds(200) };
     private readonly DispatcherTimer _trackTimer = new() { Interval = TimeSpan.FromSeconds(3) };
 
     private IntPtr _hwnd;
@@ -473,10 +477,29 @@ public partial class MainWindow : Window
         uint tid = Interop.GetWindowThreadProcessId(tray, out uint pid);
         _trayLocProc ??= (_, _, hwnd, idObject, _, _, _) =>
         {
-            if (hwnd != _hookedTray || idObject != 0 || _updateQueued) return;
+            // Сама панель поехала (авто-скрытие): ловим каждый кадр
+            if (hwnd == _hookedTray && idObject == 0)
+            {
+                if (_updateQueued) return;
+                _updateQueued = true;
+                // High priority: every ms counts to catch the start of the slide
+                Dispatcher.BeginInvoke(DispatcherPriority.Send, (Action)UpdatePosition);
+                return;
+            }
+
+            // Что-то внутри панели сменило размер или место - скорее всего
+            // соседний виджет (погода) или кнопка Пуск. Якоря устарели, но
+            // такие события сыплются пачками, поэтому с порогом
+            // Пока ширина едет, якорь важно перечитывать часто: Windows
+            // доводит кнопку Пуск постепенно, и цель уточняется на ходу
+            if ((DateTime.UtcNow - _anchorsDirtyAt).TotalMilliseconds < 60) return;
+            _anchorsDirtyAt = DateTime.UtcNow;
+            _anchorsDirty = true;
+            if (_updateQueued) return;
             _updateQueued = true;
-            // High priority: every ms counts to catch the start of the slide
-            Dispatcher.BeginInvoke(DispatcherPriority.Send, (Action)UpdatePosition);
+            // Background в очереди диспетчера уступает всему подряд - для
+            // реакции на движение панели это лишние десятки миллисекунд
+            Dispatcher.BeginInvoke(DispatcherPriority.Render, (Action)UpdatePosition);
         };
         _trayLocHook = Interop.SetWinEventHook(
             Interop.EVENT_OBJECT_LOCATIONCHANGE, Interop.EVENT_OBJECT_LOCATIONCHANGE,
@@ -622,7 +645,10 @@ public partial class MainWindow : Window
         // the widget landed in the middle of the screen.
         double windowScale = Interop.GetDpiForWindow(_hwnd) / 96.0; // px per DIP, on the current monitor
 
-        int topPx = r.Bottom - barBandPx + (barBandPx - winHeight) / 2;
+        // Виджет по просьбе смещён на пару пикселей вниз от геометрического
+        // центра полосы - визуально так он садится ровнее соседей
+        const int VerticalNudgePx = 3;
+        int topPx = r.Bottom - barBandPx + (barBandPx - winHeight) / 2 + VerticalNudgePx;
 
         bool rightAnchored = false;
         int rightAnchorLeftLimitPx = r.Left + 12;
@@ -686,7 +712,10 @@ public partial class MainWindow : Window
                 // left - align right after the widgets/weather button; without
                 // it, at the left edge. Never invade the Start button.
                 leftPx = widgetsRightPx.HasValue ? (int)widgetsRightPx.Value + 8 : r.Left + 12;
-                rightLimitPx = (int)startLeftPx.Value - 8;
+                // Зазор до кнопки Пуск. Он крошечный намеренно: видимое
+                // расстояние создаёт ещё и собственное поле крайней кнопки
+                // виджета (26 DIP против 13 у значка)
+                rightLimitPx = (int)startLeftPx.Value - 2;
             }
         }
         else
@@ -723,7 +752,10 @@ public partial class MainWindow : Window
             // repeat the positioning with the right value - the anchor is the
             // right edge, so a wrong width shifts everything.
             UpdateLayout();
-            if (Interop.GetWindowRect(_hwnd, out var wAfter) &&
+            // Пока идёт анимация ширины, окно меняет размер каждый кадр -
+            // перезапускать из-за этого позиционирование не нужно
+            if (!_sizeAnimating &&
+                Interop.GetWindowRect(_hwnd, out var wAfter) &&
                 wAfter.Right - wAfter.Left != winWidth &&
                 !_relayoutQueued)
             {
@@ -763,7 +795,7 @@ public partial class MainWindow : Window
         _barWasHidden = false;
 
         if (!_dragging && (Math.Abs(w.Left - leftPx) > 1 || Math.Abs(w.Top - topPx) > 1))
-            Interop.MoveWindowTo(_hwnd, leftPx, topPx);
+            MoveOrSlideTo(w.Left, w.Top, leftPx, topPx);
 
         // While sliding, clip the part of the widget that already left the screen -
         // without this, the excess showed up crossing a monitor arranged below
@@ -781,6 +813,7 @@ public partial class MainWindow : Window
     /// (some paths used to leave orphan popups floating).</summary>
     private void HideWidget()
     {
+        StopSlide(); // не доводить сдвиг у скрытого окна
         VolumePopup.IsOpen = false;
         if (Root.ContextMenu is { IsOpen: true } menu)
             menu.IsOpen = false;
@@ -802,6 +835,101 @@ public partial class MainWindow : Window
     private bool _barWasHidden;
     private bool _rideAnimating;
     private bool _rideDown;
+    // ---------- Плавный горизонтальный сдвиг ----------
+
+    // Соседи по панели (погода, Пуск) меняют ширину скачком, и виджет
+    // телепортировался на новое место. Короткий разгон с торможением убирает
+    // рывок; вертикаль трогать нельзя - ею занимается "поездка" за панелью.
+    private volatile bool _anchorsDirty;
+    private DateTime _anchorsDirtyAt = DateTime.MinValue;
+
+    private DispatcherTimer? _slideTimer;
+    private double _slideFromX;
+    private int _slideToX, _slideY;
+    private DateTime _slideStartedAt;
+    private const double SlideMs = 150;
+
+    private void MoveOrSlideTo(int curLeft, int curTop, int leftPx, int topPx)
+    {
+        // Прыжок по вертикали (панель переехала, смена монитора) или далёкий
+        // сдвиг анимировать незачем - это будет выглядеть как уползание
+        if (curTop != topPx || Math.Abs(leftPx - curLeft) > 260)
+        {
+            StopSlide();
+            Interop.MoveWindowTo(_hwnd, leftPx, topPx);
+            return;
+        }
+
+        _slideToX = leftPx;
+        _slideY = topPx;
+        if (_slideTimer is { IsEnabled: true })
+            return; // цель обновлена на лету, кадры уже идут
+
+        _slideFromX = curLeft;
+        _slideStartedAt = DateTime.UtcNow;
+        if (_slideTimer == null)
+        {
+            _slideTimer = new DispatcherTimer(DispatcherPriority.Render)
+            {
+                Interval = TimeSpan.FromMilliseconds(8),
+            };
+            _slideTimer.Tick += SlideTick;
+        }
+        _slideTimer.Start();
+    }
+
+    private void SlideTick(object? sender, EventArgs e)
+    {
+        if (_closed || _hwnd == IntPtr.Zero) { StopSlide(); return; }
+        double t = (DateTime.UtcNow - _slideStartedAt).TotalMilliseconds / SlideMs;
+        if (t >= 1)
+        {
+            StopSlide();
+            Interop.MoveWindowTo(_hwnd, _slideToX, _slideY);
+            return;
+        }
+        double eased = 1 - Math.Pow(1 - t, 3); // замедление к концу
+        int x = (int)Math.Round(_slideFromX + (_slideToX - _slideFromX) * eased);
+        Interop.MoveWindowTo(_hwnd, x, _slideY);
+    }
+
+    private void StopSlide() => _slideTimer?.Stop();
+
+    // ---------- Плавное изменение ширины ----------
+
+    // Ширина меняется, когда съезжают якоря панели. Анимацию ведёт сам WPF:
+    // самодельный DispatcherTimer здесь голодал в очереди диспетчера и вместо
+    // 8 мс срабатывал раз в проход позиционирования - ширина ползла ступенями
+    // по два пикселя больше секунды. SnapshotAndReplace продолжает движение с
+    // текущего значения, поэтому смена цели на лету не даёт рывка
+    private bool _sizeAnimating;
+    private const double SizeMs = 140;
+
+    private void AnimateTextWidth(double to)
+    {
+        var anim = new DoubleAnimation(to, TimeSpan.FromMilliseconds(SizeMs))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            FillBehavior = FillBehavior.HoldEnd,
+        };
+        anim.Completed += (_, _) =>
+        {
+            _sizeAnimating = false;
+            UpdateMarquee(); // бегущая строка считается от финальной ширины
+        };
+        _sizeAnimating = true;
+        TextStack.BeginAnimation(FrameworkElement.WidthProperty, anim, HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private void SetTextWidthNow(double width)
+    {
+        // Снять анимацию, иначе она держит значение и присваивание не сработает
+        TextStack.BeginAnimation(FrameworkElement.WidthProperty, null);
+        _sizeAnimating = false;
+        TextStack.Width = width;
+        UpdateMarquee();
+    }
+
     private DispatcherTimer? _rideTimer;
 
     /// <summary>Animates the widget between the settled position and the bottom
@@ -863,6 +991,9 @@ public partial class MainWindow : Window
     {
         _rideTimer?.Stop();
         _rideAnimating = false;
+        // "Поездка" сама ставит X и Y - параллельный горизонтальный сдвиг
+        // дрался бы с ней за позицию окна
+        StopSlide();
     }
 
     /// <summary>
@@ -871,15 +1002,47 @@ public partial class MainWindow : Window
     /// (volume -> shuffle -> favorites -> next -> previous).
     /// Returns false when not even the minimum version fits the given space.
     /// </summary>
+    /// <summary>Срезает пустое поле у последней видимой кнопки, чтобы значок
+    /// стоял ближе к краю виджета. Набор кнопок меняется от настроек и ширины
+    /// панели, поэтому крайняя вычисляется каждый раз.</summary>
+    private void TrimEdgeButton(double trim)
+    {
+        // Порядок совпадает с разметкой; правое поле по умолчанию у части
+        // кнопок 2, у остальных 0
+        (Button Btn, double Right)[] tail =
+        {
+            (LikeButton, 2), (ShuffleButton, 2), (PrevButton, 2),
+            (PlayPauseButton, 2), (NextButton, 0), (RepeatButton, 0), (VolumeButton, 0),
+        };
+
+        Button? last = null;
+        foreach (var (btn, _) in tail)
+            if (btn.Visibility == Visibility.Visible) last = btn;
+
+        foreach (var (btn, right) in tail)
+        {
+            var m = btn.Margin;
+            double want = ReferenceEquals(btn, last) ? -trim : right;
+            if (Math.Abs(m.Right - want) > 0.1)
+                btn.Margin = new Thickness(m.Left, m.Top, want, m.Bottom);
+        }
+    }
+
     private bool ApplyResponsiveLayout(double availableDip)
     {
         double s = _settings.Scale;
         double avail = availableDip / s; // work in pre-scale units
 
         const double IconBtn = 28;            // 26 + margins
+        // Крайняя кнопка отдаёт часть собственного поля: она 26 DIP при значке
+        // 13, и справа оставался лишний воздух. Отрицательное поле срезает
+        // пустую часть кнопки, сам значок остаётся целым
+        const double EdgeTrim = 4;
         const double PlayBtn = 34;            // 30 + margins
-        // padding + cover (only when visible) + text margins
-        double BasePart = 16 + 15 + (_settings.ShowArt ? 34 : 0);
+        // Поля Root (8 слева, справа ноль) + отступы текста + обложка.
+        // Справа поле урезано: у крайней кнопки есть собственное поле внутри
+        // (26 против 13 у значка), и вместе с 8 получалась заметная пустота
+        double BasePart = 8 + 15 + (_settings.ShowArt ? 34 : 0) - EdgeTrim;
 
         // Play stopped being mandatory: someone who only wants the "now playing"
         // display can hide it (community request)
@@ -890,7 +1053,10 @@ public partial class MainWindow : Window
         bool prev = false, next = false, like = false, shuffle = false, repeat = false, volume = false;
         Take(ref prev, _settings.ShowPrev);
         Take(ref next, _settings.ShowNext);
-        Take(ref like, _settings.ShowLike && _spotifyProc);   // favorites: Spotify only
+        // Избранное: у Spotify через его интерфейс, у вкладки - через кнопку
+        // сайта, которую нашло расширение. Без второго условия кнопка пропадала
+        // всегда, когда десктопный Spotify не запущен
+        Take(ref like, _settings.ShowLike && (_spotifyProc || _media.BrowserCanLike));
         Take(ref shuffle, _settings.ShowShuffle);
         Take(ref repeat, _settings.ShowRepeat);
         Take(ref volume, _settings.ShowVolume && _spotifyProc); // internal volume: Spotify only
@@ -911,6 +1077,13 @@ public partial class MainWindow : Window
             // room always wins, so it never overflows a full bar
             text = Math.Min(room, Math.Max(AutoMinTextWidth, natural + _settings.TextPadding));
         }
+        else if (_settings.StretchText)
+        {
+            // Растянуть до правого предела (кнопка Пуск / область уведомлений):
+            // room ограничен MaxTextWidth, и из-за него между виджетом и Пуском
+            // оставалась пустая полоса
+            text = Math.Max(MinTextWidth, MinTextWidth + (avail - used));
+        }
         else
         {
             text = Math.Max(MinTextWidth, room);
@@ -923,10 +1096,19 @@ public partial class MainWindow : Window
         SetVis(ShuffleButton, shuffle);
         SetVis(RepeatButton, repeat);
         SetVis(VolumeButton, volume);
-        if (Math.Abs(TextStack.Width - text) > 1)
+        TrimEdgeButton(EdgeTrim);
+        // Ширина меняется, когда съезжают якоря панели: кнопка Пуск на
+        // центрированной панели ходит от числа открытых окон. Мгновенная смена
+        // читается как рывок, поэтому ведём её анимацией
+        double curText = double.IsNaN(TextStack.Width) ? text : TextStack.Width;
+        if (Math.Abs(curText - text) > 1)
         {
-            TextStack.Width = text;
-            UpdateMarquee();
+            // Большой скачок (смена монитора, показ скрытого окна) анимировать
+            // незачем - это выглядело бы как уползание
+            if (Math.Abs(curText - text) > 220 || Visibility != Visibility.Visible)
+                SetTextWidthNow(text);
+            else
+                AnimateTextWidth(text);
         }
         return true;
 
@@ -954,8 +1136,16 @@ public partial class MainWindow : Window
 
     private void RefreshAnchors(IntPtr tray)
     {
-        if ((DateTime.UtcNow - _lastAnchorQuery).TotalSeconds < 5)
+        // Дешёвый опрос (погода + Пуск) можно гонять часто - именно он отвечает
+        // за то, как быстро виджет реагирует на смену ширины соседей. Полный,
+        // с обходом всех кнопок панели, нужен только правой привязке
+        bool full = IsTaskbarLeftAligned();
+        // В простое опрашивать часто незачем: о переменах сообщает хук панели,
+        // и тогда читаем сразу. Постоянный частый опрос UIA стоил ~8% ядра
+        double minGapMs = _anchorsDirty ? 60 : (full ? 5000 : 200);
+        if ((DateTime.UtcNow - _lastAnchorQuery).TotalMilliseconds < minGapMs)
             return;
+        _anchorsDirty = false;
         // Watchdog: if a query hung (UIA against a dying Explorer), the flag
         // must not hold the anchors forever - after 15s start another one
         if (_anchorQueryRunning && (DateTime.UtcNow - _lastAnchorQuery).TotalSeconds < 15)
@@ -965,9 +1155,10 @@ public partial class MainWindow : Window
         _lastAnchorQuery = DateTime.UtcNow;
         Task.Run(() =>
         {
+            bool moved = false;
             try
             {
-                var (ok, widgetsRight, startLeft, taskButtonsRight) = TaskbarAnchors.Get(tray);
+                var (ok, widgetsRight, startLeft, taskButtonsRight) = TaskbarAnchors.Get(tray, full);
                 lock (_anchorLock)
                 {
                     // The target bar changed while the query ran: these values
@@ -989,8 +1180,10 @@ public partial class MainWindow : Window
                     // If Start vanished (abnormal shell state), the other null
                     // anchors probably just failed TOGETHER - keep the old ones;
                     // with a complete read, null really means disabled
-                    _widgetsRightPx = startVanished ? (widgetsRight ?? _widgetsRightPx) : widgetsRight;
-                    _taskEndPx = startVanished ? (taskButtonsRight ?? _taskEndPx) : taskButtonsRight;
+                    double? newWidgets = startVanished ? (widgetsRight ?? _widgetsRightPx) : widgetsRight;
+                    moved = newWidgets != _widgetsRightPx || startLeft != _startLeftPx;
+                    _widgetsRightPx = newWidgets;
+                    _taskEndPx = startVanished || !full ? (taskButtonsRight ?? _taskEndPx) : taskButtonsRight;
                     _startLeftPx = startLeft;
                 }
             }
@@ -998,10 +1191,32 @@ public partial class MainWindow : Window
             {
                 _anchorQueryRunning = false;
             }
+
+            // Опрос асинхронный, и без этого новые якоря ждали бы следующего
+            // прохода позиционирования - то есть до секунды по таймеру.
+            // Именно отсюда бралась задержка перед началом анимации
+            if (moved && !_closed)
+                Dispatcher.BeginInvoke(DispatcherPriority.Render, (Action)UpdatePosition);
         });
     }
 
     // ---------- Track refresh ----------
+
+    private DateTime _spotifyProcAt = DateTime.MinValue;
+
+    /// <summary>Перечисление процессов стоит заметно дороже остального тика, а
+    /// Spotify не появляется и не исчезает по десять раз в минуту - хватает
+    /// проверки раз в 5 секунд. Объекты Process закрываем сразу: иначе на
+    /// каждый тик оставались бы висящие хендлы до сборки мусора.</summary>
+    private void RefreshSpotifyPresence()
+    {
+        if (DateTime.UtcNow - _spotifyProcAt < TimeSpan.FromSeconds(5))
+            return;
+        _spotifyProcAt = DateTime.UtcNow;
+        var procs = Process.GetProcessesByName("Spotify");
+        _spotifyProc = procs.Length > 0;
+        foreach (var p in procs) p.Dispose();
+    }
 
     private async Task RefreshTrackAsync()
     {
@@ -1012,7 +1227,7 @@ public partial class MainWindow : Window
             // Any player that publishes to SMTC (YouTube in a browser, Apple
             // Music, ...). The Spotify process no longer decides whether the
             // widget exists - it only tells whether its extras make sense.
-            _spotifyProc = Process.GetProcessesByName("Spotify").Length > 0;
+            RefreshSpotifyPresence();
 
             // SMTC calls can hang forever on a session in teardown (player
             // closing/reopening) - without a timeout the _refreshing flag stayed
@@ -1118,6 +1333,9 @@ public partial class MainWindow : Window
 
             TitleText.Text = track.Title;
             ArtistText.Text = track.Artist;
+            var explicitWanted = _media.Explicit ? Visibility.Visible : Visibility.Collapsed;
+            if (ExplicitBadge.Visibility != explicitWanted)
+                ExplicitBadge.Visibility = explicitWanted;
             UpdateMarquee();
             SetPlayPauseIcon(_isPlayingUi);
 
@@ -1139,9 +1357,16 @@ public partial class MainWindow : Window
             if (_spotifyProc && keyChanged)
                 _ = SettleStateAsync(); // re-read until Spotify renders the new track's bar
             var (liked, uiaMode, repeatMode) = _uiaState;
+            // В браузерном режиме избранное приходит от расширения (у Яндекса
+            // это aria-pressed на кнопке "Нравится"), Spotify тут ни при чём
+            if (_media.UsingBrowser)
+                liked = _media.BrowserLiked;
             // After adding to favorites, ignore a stale "not liked" - Spotify's
             // button text can take several seconds to update
-            if (liked == false && DateTime.UtcNow - _likedOptimisticAt < TimeSpan.FromSeconds(8))
+            // Правило про запаздывающий Spotify: вкладка отвечает мгновенно, и тут
+            // оно бы на 8 секунд возвращало зелёную галочку после снятия лайка
+            if (!_media.UsingBrowser && liked == false &&
+                DateTime.UtcNow - _likedOptimisticAt < TimeSpan.FromSeconds(8))
                 liked = true;
             _liked = liked;
 
@@ -1385,6 +1610,20 @@ public partial class MainWindow : Window
 
     private async void Like_Click(object sender, RoutedEventArgs e)
     {
+        // Вкладка умеет и снимать лайк, поэтому здесь это переключатель, а не
+        // одностороннее "добавить", как у Spotify
+        if (_media.UsingBrowser)
+        {
+            bool add = _liked != true;
+            _liked = add;
+            _likedOptimisticAt = DateTime.UtcNow;
+            LikeIcon.Data = add ? CheckCircleGeo : AddCircleGeo;
+            LikeIcon.Fill = add ? SpotifyGreen : DimWhite;
+            LikeButton.ToolTip = add ? L.TipLiked : L.TipLikeAdd;
+            _media.ToggleBrowserLike();
+            return;
+        }
+
         if (_liked == true) return; // already in favorites
 
         // Immediate feedback; if it fails, the next state read corrects it
@@ -1591,10 +1830,19 @@ public partial class MainWindow : Window
     /// like Spotify; otherwise it stays static.</summary>
     private void UpdateMarquee()
     {
-        double clipWidth = TextStack.Width;
+        // Значок ненормативной лексики стоит в той же строке и отъедает место -
+        // без этого длинное название считало бы, что помещается
+        double badge = ExplicitBadge.Visibility == Visibility.Visible
+            ? ExplicitBadge.Width + ExplicitBadge.Margin.Left
+            : 0;
+        // TextStack.Width на первом проходе ещё NaN: без подстраховки колонка
+        // названия получала NaN, а Canvas с такой шириной в колонке Auto
+        // схлопывается в ноль - текст пропадал целиком
+        double column = double.IsNaN(TextStack.Width) ? MaxTextWidth : TextStack.Width;
+        double clipWidth = Math.Max(0, column - badge);
         // DPI goes into the key: the rendered width changes with the monitor
         // scale and the scroll decision went stale when moving screens
-        string key = $"{TitleText.Text}|{clipWidth:0}|{VisualTreeHelper.GetDpi(this).PixelsPerDip:0.##}|{TitleText.FontFamily.Source}";
+        string key = $"{TitleText.Text}|{clipWidth:0}|{badge:0}|{VisualTreeHelper.GetDpi(this).PixelsPerDip:0.##}|{TitleText.FontFamily.Source}";
         if (key == _marqueeKey) return;
         _marqueeKey = key;
 
@@ -1610,6 +1858,13 @@ public partial class MainWindow : Window
 
         TitleShift.BeginAnimation(TranslateTransform.XProperty, null);
         TitleShift.X = 0;
+
+        // Колонка названия ужимается до текста - тогда значок стоит вплотную
+        // за ним; шире доступного места не растём, иначе поедут кнопки.
+        // Ноль недопустим: это снова спрятало бы текст
+        double titleWidth = Math.Min(textWidth, clipWidth);
+        if (!(titleWidth > 0)) titleWidth = clipWidth;
+        TitleClip.Width = titleWidth;
 
         double overflow = textWidth - clipWidth;
         if (overflow > 4)
@@ -1658,8 +1913,51 @@ public partial class MainWindow : Window
             pos += DateTime.UtcNow - _basePositionAt;
 
         double fraction = Math.Clamp(pos.TotalMilliseconds / _duration.TotalMilliseconds, 0, 1);
-        ProgressFill.Width = fraction * ProgressTrack.ActualWidth;
+
+        if (!_isPlayingUi)
+        {
+            _progressTimer?.Stop();
+            ProgressScale.ScaleX = fraction;
+            return;
+        }
+
+        ProgressScale.ScaleX = fraction;
+
+        // Ход полосы рисуется отдельным таймером: непрерывная анимация WPF
+        // держала бы перерисовку окна на 60 кадрах в секунду, а окно прозрачное
+        // и рисуется процессором - это стоило почти четверти ядра
+        if (_progressTimer == null)
+        {
+            _progressTimer = new DispatcherTimer(DispatcherPriority.Render)
+            {
+                Interval = TimeSpan.FromMilliseconds(ProgressStepMs),
+            };
+            _progressTimer.Tick += (_, _) => AdvanceProgress();
+        }
+        if (!_progressTimer.IsEnabled) _progressTimer.Start();
     }
+
+    // Шаг обновления полосы. Дальше уменьшать смысла нет: при движении
+    // масштабом сдвиг за такт и так доля пикселя, а каждая перерисовка этого
+    // окна стоит дорого - оно прозрачное и рисуется процессором
+    private const double ProgressStepMs = 200;
+    private DispatcherTimer? _progressTimer;
+
+    /// <summary>Двигает заполнение между опросами источника. Масштаб, а не
+    /// ширина: ширина прошла бы через раскладку и округлилась до целых
+    /// пикселей, из-за чего полоса шла ступеньками.</summary>
+    private void AdvanceProgress()
+    {
+        if (_closed || _duration <= TimeSpan.Zero || !_isPlayingUi ||
+            ProgressTrack.Visibility != Visibility.Visible)
+        {
+            _progressTimer?.Stop();
+            return;
+        }
+        TimeSpan pos = _basePosition + (DateTime.UtcNow - _basePositionAt);
+        ProgressScale.ScaleX = Math.Clamp(pos.TotalMilliseconds / _duration.TotalMilliseconds, 0, 1);
+    }
+
 
     private async void Progress_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
@@ -1864,7 +2162,11 @@ public partial class MainWindow : Window
         else if (_pressed)
         {
             _pressed = false;
-            SpotifyActions.OpenSpotifyWindow();
+            // Клик показывает то, откуда сейчас звук: вкладку браузера или
+            // окно приложения из системной сессии. Spotify остаётся запасным
+            // вариантом - в том числе когда не играет ничего
+            if (!_media.FocusCurrentSource())
+                SpotifyActions.OpenSpotifyWindow();
         }
     }
 
@@ -2455,6 +2757,8 @@ public partial class MainWindow : Window
         base.OnClosed(e);
         _closed = true; // stops OnLoaded continuing if it is still in the await
         _positionTimer.Stop();
+        _progressTimer?.Stop();
+        StopSlide();
         _trackTimer.Stop();
         CancelRide(); // the ride tick must not continue on a dead hwnd
         if (_mediaChanged != null) _media.Changed -= _mediaChanged;

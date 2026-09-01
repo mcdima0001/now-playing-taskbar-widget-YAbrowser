@@ -63,6 +63,12 @@ public class WidgetSettings
     /// against the tray.</summary>
     public bool AutoSizeText { get; set; } = false;
 
+    /// <summary>Текстовая колонка забирает всё свободное место панели: виджет
+    /// тянется от левого якоря до кнопки Пуск, вместо того чтобы упираться в
+    /// потолок ширины и оставлять пустую полосу. Взаимоисключающе с
+    /// <see cref="AutoSizeText"/> - там ширина, наоборот, жмётся к тексту.</summary>
+    public bool StretchText { get; set; } = false;
+
     /// <summary>Track progress bar at the bottom of the widget (click to seek).</summary>
     public bool ShowProgress { get; set; } = true;
 

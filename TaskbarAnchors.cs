@@ -9,28 +9,118 @@ namespace SpotifyTaskbarWidget;
 /// </summary>
 internal static class TaskbarAnchors
 {
+    private static IntPtr _cachedTray;
+    private static AutomationElement? _widgetsEl;
+    private static AutomationElement? _startEl;
+
+    /// <summary>Сбросить кеш элементов - после сбоя чтения или смены панели.</summary>
+    private static void Invalidate()
+    {
+        _cachedTray = IntPtr.Zero;
+        _widgetsEl = null;
+        _startEl = null;
+    }
+
     /// <summary>Ok=false means the READ failed (UIA threw) - the previous
     /// anchors stay valid. Ok=true with a null value means the element really
     /// does not exist (e.g. widgets turned off). Without this distinction a
     /// transient failure was treated as "the button disappeared" and the
     /// widget landed on top of the weather button.</summary>
-    public static (bool Ok, double? widgetsRight, double? startLeft, double? taskButtonsRight) Get(IntPtr tray)
+    /// <summary>Сами элементы-якоря - на них вешается подписка на изменение
+    /// границ. Классический хук WinEvent для них бесполезен: панель Windows 11
+    /// нарисована на XAML, отдельных окон у кнопок нет, и LOCATIONCHANGE не
+    /// приходит. UIA же присылает уведомление честно.</summary>
+    public static (AutomationElement? Widgets, AutomationElement? Start) Buttons(IntPtr tray)
+    {
+        try
+        {
+            var root = AutomationElement.FromHandle(tray);
+            var widgets = root.FindFirst(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.AutomationIdProperty, "WidgetsButton"));
+            var start = root.FindFirst(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.AutomationIdProperty, "StartButton"));
+            return (widgets, start);
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
+    /// <param name="includeTaskButtons">Обход всех кнопок панели стоит дорого и
+    /// нужен только правой привязке (лево-выровненные значки). Для обычного
+    /// случая его пропускаем, чтобы опрашивать якоря часто и без нагрузки.</param>
+    public static (bool Ok, double? widgetsRight, double? startLeft, double? taskButtonsRight) Get(
+        IntPtr tray, bool includeTaskButtons = true)
     {
         double? widgetsRight = null, startLeft = null, taskButtonsRight = null;
         try
         {
-            var root = AutomationElement.FromHandle(tray);
+            // Поиск по всему дереву панели - самая дорогая часть опроса, а
+            // кнопки живут ровно столько же, сколько сама панель. Держим ссылки
+            // и на каждом проходе читаем только их границы; если элемент умер
+            // (перезапуск Explorer), чтение бросит исключение и кеш сбросится
+            if (tray != _cachedTray || _widgetsEl == null || _startEl == null)
+            {
+                var fresh = Buttons(tray);
+                _widgetsEl = fresh.Widgets;
+                _startEl = fresh.Start;
+                _cachedTray = tray;
+            }
 
-            var widgets = root.FindFirst(TreeScope.Descendants,
-                new PropertyCondition(AutomationElement.AutomationIdProperty, "WidgetsButton"));
+            var root = AutomationElement.FromHandle(tray);
+            var widgets = _widgetsEl;
             if (widgets != null)
             {
                 var r = widgets.Current.BoundingRectangle;
                 if (!r.IsEmpty) widgetsRight = r.Right;
+
+                // Прямоугольник кнопки заметно шире того, что в ней нарисовано:
+                // справа висит пустой отступ (у погоды "31C Sunny" это 190 px
+                // кнопки против 107 px содержимого), и виджет вставал с дырой.
+                // Берём правый край самого правого текста/иконки внутри - он же
+                // сам поедет, когда погода станет длиннее.
+                try
+                {
+                    // Потомков ищем заново каждый раз. Кеш здесь давал сбой:
+                    // виджет погоды перерисовывается (то "34°C Sunny", то
+                    // "Temps to rise"), старые элементы умирают, чтение по ним
+                    // падало - и якорем становился прямоугольник кнопки целиком,
+                    // из-за чего виджет отъезжал вправо и больше не подтягивался
+                    var found = widgets.FindAll(TreeScope.Descendants, new OrCondition(
+                        new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text),
+                        new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Image)));
+                    double? contentRight = null;
+                    foreach (AutomationElement el in found)
+                    {
+                        // Элемент может исчезнуть посреди обхода (погода
+                        // обновляется) - это не повод терять всю привязку
+                        try
+                        {
+                            var er = el.Current.BoundingRectangle;
+                            if (er.IsEmpty) continue;
+                            if (contentRight is not double cur || er.Right > cur) contentRight = er.Right;
+                        }
+                        catch { }
+                    }
+                    // Доверяем только значению внутри кнопки: чужой элемент или
+                    // мусорный прямоугольник не должны утащить виджет
+                    if (contentRight is double cr && cr > r.Left && cr < r.Right)
+                        widgetsRight = cr;
+                    else
+                        // Содержимое не прочиталось (кнопка как раз
+                        // перерисовывается). Прыгать на её внешний край нельзя -
+                        // это видимый скачок; пусть окно оставит прежний якорь
+                        return (false, null, null, null);
+                }
+                catch
+                {
+                    Invalidate();
+                    return (false, null, null, null);
+                }
             }
 
-            var start = root.FindFirst(TreeScope.Descendants,
-                new PropertyCondition(AutomationElement.AutomationIdProperty, "StartButton"));
+            var start = _startEl;
             if (start != null)
             {
                 var r = start.Current.BoundingRectangle;
@@ -39,6 +129,9 @@ internal static class TaskbarAnchors
 
             // End of the app icon row (so they are not covered when the widget
             // anchors right, on left-aligned / secondary taskbars)
+            if (!includeTaskButtons)
+                return (true, widgetsRight, startLeft, null);
+
             var buttons = root.FindAll(TreeScope.Descendants,
                 new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
             foreach (AutomationElement button in buttons)
@@ -60,6 +153,9 @@ internal static class TaskbarAnchors
         }
         catch
         {
+            // Чаще всего это умерший элемент после перезапуска Explorer -
+            // сбрасываем кеш, следующий проход найдёт кнопки заново
+            Invalidate();
             return (false, null, null, null);
         }
         return (true, widgetsRight, startLeft, taskButtonsRight);
