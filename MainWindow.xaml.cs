@@ -176,6 +176,15 @@ public partial class MainWindow : Window
         Loaded += OnLoaded;
     }
 
+    /// <summary>Идентификатор горячей клавиши в пределах окна - значение
+    /// произвольное, лишь бы не совпало с чужим в этом же потоке.</summary>
+    private const int SnapHotkeyId = 0xA17;
+
+    /// <summary>Клавишу регистрирует только одно окно: она глобальная, и на
+    /// второй монитор её всё равно не выдадут (RegisterHotKey вернёт false).
+    /// Само действие потом применяется ко всем окнам.</summary>
+    private bool _hotkeyOwner;
+
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
@@ -183,6 +192,49 @@ public partial class MainWindow : Window
         // Do not steal focus on click and do not show up in Alt+Tab
         int ex = Interop.GetWindowLong(_hwnd, Interop.GWL_EXSTYLE);
         Interop.SetWindowLong(_hwnd, Interop.GWL_EXSTYLE, ex | Interop.WS_EX_TOOLWINDOW | Interop.WS_EX_NOACTIVATE);
+
+        HwndSource.FromHwnd(_hwnd)?.AddHook(HotkeyHook);
+        // MOD_NOREPEAT: зажатая клавиша не должна сыпать повторами
+        _hotkeyOwner = Interop.RegisterHotKey(
+            _hwnd, SnapHotkeyId,
+            Interop.MOD_CONTROL | Interop.MOD_ALT | Interop.MOD_NOREPEAT,
+            Interop.VK_OEM_PERIOD);
+    }
+
+    private IntPtr HotkeyHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg == Interop.WM_HOTKEY && wParam.ToInt32() == SnapHotkeyId)
+        {
+            SnapAllBack();
+            handled = true;
+        }
+        return IntPtr.Zero;
+    }
+
+    /// <summary>Ctrl+Alt+"." и пункт меню: вернуть виджеты на автоматическое
+    /// место. Ищет якоря заново - привязка обычно теряется как раз потому, что
+    /// ссылка на кнопку панели пережила перерисовку и отдаёт мусор.</summary>
+    private static void SnapAllBack()
+    {
+        TaskbarAnchors.Reset();
+        foreach (var w in Instances.ToArray())
+            w.SnapBack();
+    }
+
+    private void SnapBack()
+    {
+        _settings.AutoPosition = true;
+        _settings.ManualX.Clear();
+        _settings.ManualGap.Clear();
+        _settings.Save();
+        MoveMenu.IsChecked = false;
+        _moveMode = false;
+        Root.Cursor = Cursors.Hand;
+        // Забыть прочитанные якоря: следующий опрос возьмёт свежие
+        _widgetsRightPx = null;
+        _startLeftPx = null;
+        _anchorsMissingSince = DateTime.MinValue;
+        UpdatePosition();
     }
 
     /// <summary>Applies the strings in the selected language.</summary>
@@ -190,7 +242,7 @@ public partial class MainWindow : Window
     {
         MoveMenu.Header = L.MoveWidget;
         MoveMenu.ToolTip = L.MoveWidgetTip;
-        ResetPosMenu.Header = L.ResetAutoPos;
+        ResetPosMenu.Header = L.ResetAutoPos + "  (Ctrl+Alt+.)";
         MonitorMenu.Header = L.MonitorMenu;
         SizeMenuItem.Header = L.SizeMenu;
         ArtMenu.Header = L.ShowArt;
@@ -2182,14 +2234,7 @@ public partial class MainWindow : Window
     {
         // Restores the automatic POSITIONS on every bar; the monitor selection
         // stays as it is (clearing it destroyed the user's choice)
-        _settings.AutoPosition = true;
-        _settings.ManualX.Clear();
-        _settings.ManualGap.Clear();
-        _settings.Save();
-        MoveMenu.IsChecked = false;
-        _moveMode = false;
-        Root.Cursor = Cursors.Hand;
-        UpdatePosition();
+        SnapAllBack();
     }
 
     private void Size_Click(object sender, RoutedEventArgs e)
@@ -2756,6 +2801,11 @@ public partial class MainWindow : Window
     {
         base.OnClosed(e);
         _closed = true; // stops OnLoaded continuing if it is still in the await
+        if (_hotkeyOwner)
+        {
+            Interop.UnregisterHotKey(_hwnd, SnapHotkeyId);
+            _hotkeyOwner = false;
+        }
         _positionTimer.Stop();
         _progressTimer?.Stop();
         StopSlide();

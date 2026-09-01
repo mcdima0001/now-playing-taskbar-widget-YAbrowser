@@ -13,12 +13,35 @@ internal static class TaskbarAnchors
     private static AutomationElement? _widgetsEl;
     private static AutomationElement? _startEl;
 
+    /// <summary>Сколько чтений подряд не удались. Ссылка на кнопку может
+    /// пережить перерисовку виджета погоды и при этом отдавать мусор - без
+    /// счётчика виджет оставался с прежним якорем навсегда и выглядел
+    /// "съехавшим".</summary>
+    private static int _failStreak;
+
+    /// <summary>После стольких неудач подряд (примерно секунда при опросе раз
+    /// в 200 мс) кнопки ищутся заново.</summary>
+    private const int FailsBeforeRefind = 5;
+
     /// <summary>Сбросить кеш элементов - после сбоя чтения или смены панели.</summary>
     private static void Invalidate()
     {
         _cachedTray = IntPtr.Zero;
         _widgetsEl = null;
         _startEl = null;
+        _failStreak = 0;
+    }
+
+    /// <summary>Забыть найденные кнопки и искать заново. Дёргается вручную -
+    /// пунктом меню и горячей клавишей, когда виджет всё же встал не там.</summary>
+    public static void Reset() => Invalidate();
+
+    /// <summary>Неудачное чтение: пока их немного, кеш бережём (кнопка просто
+    /// перерисовывается), но затянувшаяся серия означает мёртвую ссылку.</summary>
+    private static (bool, double?, double?, double?) Fail()
+    {
+        if (++_failStreak >= FailsBeforeRefind) Invalidate();
+        return (false, null, null, null);
     }
 
     /// <summary>Ok=false means the READ failed (UIA threw) - the previous
@@ -111,7 +134,7 @@ internal static class TaskbarAnchors
                         // Содержимое не прочиталось (кнопка как раз
                         // перерисовывается). Прыгать на её внешний край нельзя -
                         // это видимый скачок; пусть окно оставит прежний якорь
-                        return (false, null, null, null);
+                        return Fail();
                 }
                 catch
                 {
@@ -130,7 +153,10 @@ internal static class TaskbarAnchors
             // End of the app icon row (so they are not covered when the widget
             // anchors right, on left-aligned / secondary taskbars)
             if (!includeTaskButtons)
+            {
+                _failStreak = 0;
                 return (true, widgetsRight, startLeft, null);
+            }
 
             var buttons = root.FindAll(TreeScope.Descendants,
                 new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
@@ -158,6 +184,7 @@ internal static class TaskbarAnchors
             Invalidate();
             return (false, null, null, null);
         }
+        _failStreak = 0;
         return (true, widgetsRight, startLeft, taskButtonsRight);
     }
 }

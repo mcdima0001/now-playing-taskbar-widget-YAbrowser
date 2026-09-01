@@ -340,4 +340,20 @@ internal static class Interop
 
         return true;
     }
+
+    // ---------- Глобальная горячая клавиша ----------
+
+    public const int WM_HOTKEY = 0x0312;
+    public const uint MOD_ALT = 0x0001;
+    public const uint MOD_CONTROL = 0x0002;
+    public const uint MOD_NOREPEAT = 0x4000;
+    /// <summary>Клавиша "." - код физический, поэтому раскладка не важна:
+    /// на русской это та же клавиша с "ю".</summary>
+    public const uint VK_OEM_PERIOD = 0xBE;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 }
