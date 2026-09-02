@@ -384,7 +384,13 @@
                         Margin="0,0,2,0" VerticalAlignment="Center" Click="Like_Click"
                         ToolTip="Add to your Spotify favorites">
                     <Path x:Name="LikeIcon" Width="14" Height="14" Stretch="Uniform" Fill="#B3B3B3"
-                          Data="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8z M11.75 8a.75.75 0 0 1-.75.75H8.75V11a.75.75 0 0 1-1.5 0V8.75H5a.75.75 0 0 1 0-1.5h2.25V5a.75.75 0 0 1 1.5 0v2.25H11a.75.75 0 0 1 .75.75z"/>
+                          RenderTransformOrigin="0.5,0.5"
+                          Data="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8z M11.75 8a.75.75 0 0 1-.75.75H8.75V11a.75.75 0 0 1-1.5 0V8.75H5a.75.75 0 0 1 0-1.5h2.25V5a.75.75 0 0 1 1.5 0v2.25H11a.75.75 0 0 1 .75.75z">
+                        <Path.RenderTransform>
+                            <!-- Прыжок при клике по лайку; в покое всегда 1 -->
+                            <ScaleTransform x:Name="LikeIconScale"/>
+                        </Path.RenderTransform>
+                    </Path>
                 </Button>
 
                 <!-- Shuffle: Spotify icon + star (smart) + green dot (active) -->

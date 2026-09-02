@@ -1717,6 +1717,40 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>Отклик на клик по лайку: сердечко сжимается и выпрыгивает
+    /// (добавили) или коротко приседает (убрали). Разовая анимация на
+    /// ~0.3 секунды - в отличие от постоянных, для CPU-отрисовки это ничто.</summary>
+    private void PopLikeIcon(bool add)
+    {
+        var frames = new DoubleAnimationUsingKeyFrames();
+        if (add)
+        {
+            // Сжаться перед прыжком - без этого разгон не читается
+            frames.KeyFrames.Add(new SplineDoubleKeyFrame(0.7,
+                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(70))));
+            frames.KeyFrames.Add(new SplineDoubleKeyFrame(1.35,
+                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(170)),
+                new KeySpline(0.2, 0.9, 0.4, 1.0)));
+            frames.KeyFrames.Add(new SplineDoubleKeyFrame(1.0,
+                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(300)),
+                new KeySpline(0.4, 0.0, 0.6, 1.0)));
+        }
+        else
+        {
+            frames.KeyFrames.Add(new SplineDoubleKeyFrame(0.75,
+                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(90))));
+            frames.KeyFrames.Add(new SplineDoubleKeyFrame(1.0,
+                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(220)),
+                new KeySpline(0.3, 0.7, 0.5, 1.0)));
+        }
+        // Snapshot: повторный клик посреди прыжка начинает новый с текущего
+        // масштаба, а не копит анимации поверх друг друга
+        LikeIconScale.BeginAnimation(ScaleTransform.ScaleXProperty, frames,
+            HandoffBehavior.SnapshotAndReplace);
+        LikeIconScale.BeginAnimation(ScaleTransform.ScaleYProperty, frames,
+            HandoffBehavior.SnapshotAndReplace);
+    }
+
     private async void Like_Click(object sender, RoutedEventArgs e)
     {
         // Вкладка умеет и снимать лайк, поэтому здесь это переключатель, а не
@@ -1727,6 +1761,7 @@ public partial class MainWindow : Window
             _liked = add;
             _likedOptimisticAt = DateTime.UtcNow;
             SetLikeIcon(add);
+            PopLikeIcon(add);
             LikeButton.ToolTip = add ? L.TipLiked : L.TipLikeAdd;
             _media.ToggleBrowserLike();
             return;
@@ -1738,6 +1773,7 @@ public partial class MainWindow : Window
         _liked = true;
         _likedOptimisticAt = DateTime.UtcNow;
         SetLikeIcon(true);
+        PopLikeIcon(true);
         LikeButton.ToolTip = L.TipLiked;
 
         bool ok = await Task.Run(() => _uia.AddToFavorites());
