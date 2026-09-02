@@ -1719,7 +1719,7 @@ public partial class MainWindow : Window
 
     /// <summary>Отклик на клик по лайку: сердечко сжимается и выпрыгивает
     /// (добавили) или коротко приседает (убрали). Разовая анимация на
-    /// ~0.5 секунды - в отличие от постоянных, для CPU-отрисовки это ничто.</summary>
+    /// ~0.55 секунды - в отличие от постоянных, для CPU-отрисовки это ничто.</summary>
     private void PopLikeIcon(bool add)
     {
         var frames = new DoubleAnimationUsingKeyFrames();
@@ -1727,20 +1727,20 @@ public partial class MainWindow : Window
         {
             // Сжаться перед прыжком - без этого разгон не читается
             frames.KeyFrames.Add(new SplineDoubleKeyFrame(0.7,
-                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(100))));
+                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(115))));
             frames.KeyFrames.Add(new SplineDoubleKeyFrame(1.35,
-                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(260)),
+                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(300)),
                 new KeySpline(0.2, 0.9, 0.4, 1.0)));
             frames.KeyFrames.Add(new SplineDoubleKeyFrame(1.0,
-                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(480)),
+                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(550)),
                 new KeySpline(0.4, 0.0, 0.6, 1.0)));
         }
         else
         {
             frames.KeyFrames.Add(new SplineDoubleKeyFrame(0.75,
-                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(130))));
+                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(150))));
             frames.KeyFrames.Add(new SplineDoubleKeyFrame(1.0,
-                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(380)),
+                KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(430)),
                 new KeySpline(0.3, 0.7, 0.5, 1.0)));
         }
         // Snapshot: повторный клик посреди прыжка начинает новый с текущего
