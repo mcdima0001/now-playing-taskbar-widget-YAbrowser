@@ -29,6 +29,12 @@ public partial class MainWindow : Window
     private static readonly Geometry CheckCircleGeo = Geometry.Parse("M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm11.748-1.97a.75.75 0 0 0-1.06-1.06l-4.47 4.44-1.405-1.406a.75.75 0 1 0-1.061 1.06l2.466 2.467 5.53-5.5z");
 
     // Spotify colours; the neutral ones depend on the bar theme (light/dark)
+    // Сердечки для браузерного режима - как в плеере Яндекс Музыки: контурное
+    // "не в избранном", залитое "в избранном". Контур - геометрия с дыркой
+    // (Bootstrap Icons "heart"/"heart-fill"), красится заливкой, как все иконки
+    private static readonly Geometry HeartGeo = Geometry.Parse("m8 2.748-.717-.737C5.6.281 2.514.878 1.4 3.053c-.523 1.023-.641 2.5.314 4.385.92 1.815 2.834 3.989 6.286 6.169 3.452-2.18 5.365-4.354 6.286-6.17.955-1.883.838-3.362.314-4.385C13.486.878 10.4.28 8.717 2.01L8 2.748zM8 15C-7.333 4.868 3.279-3.04 7.824 1.143c.06.055.119.112.176.171a3.12 3.12 0 0 1 .176-.17C12.72-3.042 23.333 4.867 8 15z");
+    private static readonly Geometry HeartFillGeo = Geometry.Parse("M8 1.314C12.438-3.248 23.534 4.735 8 15-7.534 4.736 3.562-3.248 8 1.314z");
+
     private static readonly Brush SpotifyGreen = new SolidColorBrush(Color.FromRgb(0x1E, 0xD7, 0x60));
     private Brush Subdued = new SolidColorBrush(Color.FromRgb(0xB3, 0xB3, 0xB3));
     private Brush DimWhite = new SolidColorBrush(Color.FromArgb(0x66, 0xFF, 0xFF, 0xFF));
@@ -1410,8 +1416,7 @@ public partial class MainWindow : Window
                 RepeatIcon.Fill = DimWhite;
                 RepeatDot.Visibility = Visibility.Collapsed;
                 RepeatOneBadge.Visibility = Visibility.Collapsed;
-                LikeIcon.Data = AddCircleGeo;
-                LikeIcon.Fill = DimWhite;
+                SetLikeIcon(null);
                 _liked = null;
                 SetAlbumArt(null);
                 _lastTrackKey = "";
@@ -1460,8 +1465,7 @@ public partial class MainWindow : Window
 
             ApplyRepeatVisual(repeatMode);
 
-            LikeIcon.Data = liked == true ? CheckCircleGeo : AddCircleGeo;
-            LikeIcon.Fill = liked == true ? SpotifyGreen : (liked == false ? Subdued : DimWhite);
+            SetLikeIcon(liked);
             // Honest: with Spotify minimized we cannot confirm the state (null) -
             // say so instead of letting the "+" look like "not liked"
             LikeButton.ToolTip = liked == true ? L.TipLiked
@@ -1696,6 +1700,23 @@ public partial class MainWindow : Window
         await RefreshTrackAsync();
     }
 
+    /// <summary>Иконка избранного зависит от источника: у вкладки - сердечко,
+    /// как в самом плеере Яндекса, у Spotify - прежние кружки с плюсом и
+    /// галочкой (там лайк односторонний, и галочка это подчёркивает).</summary>
+    private void SetLikeIcon(bool? liked)
+    {
+        if (_media.UsingBrowser)
+        {
+            LikeIcon.Data = liked == true ? HeartFillGeo : HeartGeo;
+            LikeIcon.Fill = liked == true ? Brushes.White : (liked == false ? Subdued : DimWhite);
+        }
+        else
+        {
+            LikeIcon.Data = liked == true ? CheckCircleGeo : AddCircleGeo;
+            LikeIcon.Fill = liked == true ? SpotifyGreen : (liked == false ? Subdued : DimWhite);
+        }
+    }
+
     private async void Like_Click(object sender, RoutedEventArgs e)
     {
         // Вкладка умеет и снимать лайк, поэтому здесь это переключатель, а не
@@ -1705,8 +1726,7 @@ public partial class MainWindow : Window
             bool add = _liked != true;
             _liked = add;
             _likedOptimisticAt = DateTime.UtcNow;
-            LikeIcon.Data = add ? CheckCircleGeo : AddCircleGeo;
-            LikeIcon.Fill = add ? SpotifyGreen : DimWhite;
+            SetLikeIcon(add);
             LikeButton.ToolTip = add ? L.TipLiked : L.TipLikeAdd;
             _media.ToggleBrowserLike();
             return;
@@ -1717,8 +1737,7 @@ public partial class MainWindow : Window
         // Immediate feedback; if it fails, the next state read corrects it
         _liked = true;
         _likedOptimisticAt = DateTime.UtcNow;
-        LikeIcon.Data = CheckCircleGeo;
-        LikeIcon.Fill = SpotifyGreen;
+        SetLikeIcon(true);
         LikeButton.ToolTip = L.TipLiked;
 
         bool ok = await Task.Run(() => _uia.AddToFavorites());
