@@ -1453,7 +1453,14 @@ public partial class MainWindow : Window
             // В браузерном режиме избранное приходит от расширения (у Яндекса
             // это aria-pressed на кнопке "Нравится"), Spotify тут ни при чём
             if (_media.UsingBrowser)
+            {
                 liked = _media.BrowserLiked;
+                // Сайт перекрашивает свою кнопку с запаздыванием: первый отчёт
+                // после клика приходит ещё со старым лайком, и сердечко на миг
+                // серело посреди анимации. Пару секунд верим своему клику
+                if (liked != _liked && DateTime.UtcNow - _likedOptimisticAt < TimeSpan.FromSeconds(2.5))
+                    liked = _liked;
+            }
             // After adding to favorites, ignore a stale "not liked" - Spotify's
             // button text can take several seconds to update
             // Правило про запаздывающий Spotify: вкладка отвечает мгновенно, и тут
