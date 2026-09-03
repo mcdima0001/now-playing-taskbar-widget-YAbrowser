@@ -9,7 +9,7 @@ namespace SpotifyTaskbarWidget;
 
 /// <summary>Снимок того, что играет во вкладке браузера.</summary>
 public sealed record BrowserState(
-    bool Playing, string Title, string Artist, string Art,
+    bool Playing, string Title, string Version, string Artist, string Art,
     double Position, double Duration,
     bool CanSeek, bool CanNext, bool CanPrev,
     bool CanLike, bool? Liked, bool Explicit, DateTime At);
@@ -325,6 +325,7 @@ public sealed class BrowserBridge
                 next = new BrowserState(
                     Playing: Bool(root, "playing"),
                     Title: Str(root, "title"),
+                    Version: Str(root, "version"),
                     Artist: Str(root, "artist"),
                     Art: Str(root, "art"),
                     Position: Num(root, "position"),
@@ -355,7 +356,8 @@ public sealed class BrowserBridge
         // Сменился трек/состояние - полное обновление; иначе только позиция,
         // и дёргать тяжёлый путь с обложкой и UIA незачем
         bool heavy = prev == null || next == null ||
-                     prev.Title != next.Title || prev.Artist != next.Artist ||
+                     prev.Title != next.Title || prev.Version != next.Version ||
+                     prev.Artist != next.Artist ||
                      prev.Art != next.Art || prev.Playing != next.Playing ||
                      prev.CanNext != next.CanNext || prev.CanPrev != next.CanPrev ||
                      prev.Liked != next.Liked || prev.CanLike != next.CanLike ||

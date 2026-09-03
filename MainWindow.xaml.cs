@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
@@ -1407,7 +1408,7 @@ public partial class MainWindow : Window
 
             if (track == null || string.IsNullOrWhiteSpace(track.Title))
             {
-                TitleText.Text = "Spotify";
+                SetTitleText("Spotify", "");
                 ArtistText.Text = L.NothingPlaying;
                 SetPlayPauseIcon(false);
                 ShuffleIcon.Fill = DimWhite;
@@ -1424,7 +1425,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            TitleText.Text = track.Title;
+            SetTitleText(track.Title, _media.TitleVersion);
             ArtistText.Text = track.Artist;
             var explicitWanted = _media.Explicit ? Visibility.Visible : Visibility.Collapsed;
             if (ExplicitBadge.Visibility != explicitWanted)
@@ -1710,6 +1711,23 @@ public partial class MainWindow : Window
     /// <summary>Иконка избранного зависит от источника: у вкладки - сердечко,
     /// как в самом плеере Яндекса, у Spotify - прежние кружки с плюсом и
     /// галочкой (там лайк односторонний, и галочка это подчёркивает).</summary>
+    private string _titleShown = "";
+
+    /// <summary>Название и необязательная серая приписка-версия ("Remix") -
+    /// как в самом плеере Яндекса. TextBlock.Text не отражает Inlines, поэтому
+    /// показанная строка хранится отдельно: на ней строится ключ бегущей
+    /// строки, иначе прокрутка не замечала бы смену текста.</summary>
+    private void SetTitleText(string title, string version)
+    {
+        string shown = version.Length > 0 ? title + " " + version : title;
+        if (shown == _titleShown && TitleText.Inlines.Count > 0) return;
+        _titleShown = shown;
+        TitleText.Inlines.Clear();
+        TitleText.Inlines.Add(new Run(title));
+        if (version.Length > 0)
+            TitleText.Inlines.Add(new Run(" " + version) { Foreground = Subdued });
+    }
+
     private void SetLikeIcon(bool? liked)
     {
         if (_media.UsingBrowser)
@@ -1992,7 +2010,7 @@ public partial class MainWindow : Window
         double clipWidth = Math.Max(0, column - badge);
         // DPI goes into the key: the rendered width changes with the monitor
         // scale and the scroll decision went stale when moving screens
-        string key = $"{TitleText.Text}|{clipWidth:0}|{badge:0}|{VisualTreeHelper.GetDpi(this).PixelsPerDip:0.##}|{TitleText.FontFamily.Source}";
+        string key = $"{_titleShown}|{clipWidth:0}|{badge:0}|{VisualTreeHelper.GetDpi(this).PixelsPerDip:0.##}|{TitleText.FontFamily.Source}";
         if (key == _marqueeKey) return;
         _marqueeKey = key;
 

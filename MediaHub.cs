@@ -32,6 +32,10 @@ public sealed class MediaHub
     /// <summary>У вкладки есть кнопка избранного - окну можно показывать свою.</summary>
     public bool BrowserCanLike => _useBrowser && _browser.Current is { CanLike: true };
 
+    /// <summary>Приписка к названию - "Remix", "Acoustic". Окно рисует её
+    /// серой, как сам Яндекс; в SMTC такого поля нет.</summary>
+    public string TitleVersion => _useBrowser ? _browser.Current?.Version ?? "" : "";
+
     /// <summary>Трек помечен как содержащий ненормативную лексику. Приходит
     /// только из браузера: ни SMTC, ни mediaSession такого поля не имеют.</summary>
     public bool Explicit => _useBrowser && _browser.Current is { Explicit: true };

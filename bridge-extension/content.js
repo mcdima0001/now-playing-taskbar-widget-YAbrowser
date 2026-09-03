@@ -229,13 +229,15 @@
     if (!el) {
       if (!meta || !meta.title) return null;
       const prog = sliderProgress();
-      const ver = titleVersion(meta.title);
-      // Не дублировать, если сайт однажды начнёт класть версию в metadata
-      const title = ver && !meta.title.toLowerCase().includes(ver.toLowerCase())
-        ? meta.title + ' ' + ver : meta.title;
+      // Версия ("Remix") уходит отдельным полем: виджет рисует её серой,
+      // как сам Яндекс, а для этого она не должна быть частью названия.
+      // Если сайт однажды положит её в metadata сам - не дублируем
+      let ver = titleVersion(meta.title);
+      if (ver && meta.title.toLowerCase().includes(ver.toLowerCase())) ver = '';
       return {
         playing: playbackState() === 'playing',
-        title: title,
+        title: meta.title,
+        version: ver,
         artist: meta.artist || location.hostname.replace(/^www\./, ''),
         album: meta.album || '',
         art: biggestArt(meta),
@@ -273,7 +275,7 @@
   }
 
   function key(s) {
-    return [s.playing, s.title, s.artist, s.art, Math.round(s.duration), s.canNext, s.canPrev, s.liked, s.explicit].join('|');
+    return [s.playing, s.title, s.version, s.artist, s.art, Math.round(s.duration), s.canNext, s.canPrev, s.liked, s.explicit].join('|');
   }
 
   function send(state, why) {
