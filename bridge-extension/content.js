@@ -180,6 +180,32 @@
   // вёрстку: у Яндекса это svg с классом ExplicitMarkIcon_explicitMark и
   // подписью "Возрастное ограничение 18+". Такие же значки стоят у треков в
   // списках, поэтому ищем только внутри плеербара
+  // Приписка к названию - "Remix", "Acoustic" и т.п. Яндекс рисует её
+  // отдельным серым элементом, в mediaSession.metadata.title её нет
+  function titleVersion(title) {
+    const bar = controls().bar;
+    if (!bar || !title) return '';
+    try {
+      // Надёжный источник - подпись ссылки на трек: у Яндекса это шаблон
+      // "Трек {название} {версия}", у треков без версии хвост пустой
+      const link = bar.querySelector('a[aria-label^="Трек "]');
+      if (link) {
+        const label = link.getAttribute('aria-label').slice(5).trim();
+        if (label.length > title.length &&
+            label.toLowerCase().startsWith(title.toLowerCase())) {
+          const v = label.slice(title.length).trim();
+          if (v && v.length <= 40) return v;
+        }
+      }
+      // Запасной вариант - элемент с классом версии рядом с названием
+      const el = bar.querySelector('[class*="Meta_version"], [class*="_version__"]');
+      const v = el && el.textContent ? el.textContent.trim() : '';
+      return v && v.length <= 40 ? v : '';
+    } catch {
+      return '';
+    }
+  }
+
   function explicitMark() {
     const bar = controls().bar;
     if (!bar) return false;
@@ -203,9 +229,13 @@
     if (!el) {
       if (!meta || !meta.title) return null;
       const prog = sliderProgress();
+      const ver = titleVersion(meta.title);
+      // Не дублировать, если сайт однажды начнёт класть версию в metadata
+      const title = ver && !meta.title.toLowerCase().includes(ver.toLowerCase())
+        ? meta.title + ' ' + ver : meta.title;
       return {
         playing: playbackState() === 'playing',
-        title: meta.title,
+        title: title,
         artist: meta.artist || location.hostname.replace(/^www\./, ''),
         album: meta.album || '',
         art: biggestArt(meta),

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Now Playing Bridge",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Отдаёт текущий трек из вкладок браузера виджету Now Playing на панели задач.",
   "permissions": [
     "alarms",
