@@ -419,6 +419,15 @@
                                     <TranslateTransform x:Name="TitleShift"/>
                                 </TextBlock.RenderTransform>
                             </TextBlock>
+                            <!-- Вторая копия названия - лента без шва: едет на том
+                                 же сдвиге TitleShift (назначается в коде), стоит
+                                 сразу за первой копией. Когда первая уходит за
+                                 левый край, вторая как раз занимает её место -
+                                 виток замыкается без прыжка. Видна только пока
+                                 идёт прокрутка -->
+                            <TextBlock x:Name="TitleText2" Foreground="White"
+                                       FontWeight="SemiBold" FontSize="12"
+                                       Canvas.Top="0" Visibility="Collapsed"/>
                         </Canvas>
                         <!-- Пометка о ненормативной лексике. Весь значок - один
                              контур: кольцо, палочка и точка в одной геометрии с

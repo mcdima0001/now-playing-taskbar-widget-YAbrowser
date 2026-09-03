@@ -179,6 +179,11 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        // Вторая копия названия едет на общем сдвиге с первой - тот же
+        // экземпляр TranslateTransform, назначенный обоим RenderTransform.
+        // WPF поддерживает разделяемые Freezable: смена X применяется сразу
+        // ко всем владельцам
+        TitleText2.RenderTransform = TitleShift;
         Instances.Add(this);
         Loaded += OnLoaded;
     }
@@ -1722,10 +1727,16 @@ public partial class MainWindow : Window
         string shown = version.Length > 0 ? title + " " + version : title;
         if (shown == _titleShown && TitleText.Inlines.Count > 0) return;
         _titleShown = shown;
-        TitleText.Inlines.Clear();
-        TitleText.Inlines.Add(new Run(title));
+        FillTitleRuns(TitleText, title, version);
+        FillTitleRuns(TitleText2, title, version);
+    }
+
+    private static void FillTitleRuns(TextBlock block, string title, string version)
+    {
+        block.Inlines.Clear();
+        block.Inlines.Add(new Run(title));
         if (version.Length > 0)
-            TitleText.Inlines.Add(new Run(" " + version) { Foreground = Subdued });
+            block.Inlines.Add(new Run(" " + version) { Foreground = Subdued });
     }
 
     private void SetLikeIcon(bool? liked)
@@ -2026,6 +2037,7 @@ public partial class MainWindow : Window
 
         TitleShift.BeginAnimation(TranslateTransform.XProperty, null);
         TitleShift.X = 0;
+        TitleText2.Visibility = Visibility.Collapsed;
 
         // Колонка названия ужимается до текста - тогда значок стоит вплотную
         // за ним; шире доступного места не растём, иначе поедут кнопки.
@@ -2037,29 +2049,51 @@ public partial class MainWindow : Window
         double overflow = textWidth - clipWidth;
         if (overflow > 4)
         {
-            double scrollSeconds = Math.Max(1.5, overflow / 25.0);
-            double end = -(overflow + 12);
-            var anim = new DoubleAnimationUsingKeyFrames();
-            double t = 2.5; // initial pause (read the start)
-            anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.Zero)));
-            anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
-            t += scrollSeconds;
-            anim.KeyFrames.Add(new LinearDoubleKeyFrame(end, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
-            t += 1.5; // pause at the end (read the rest)
-            anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(end, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
             if (_settings.ScrollTitleOnce)
             {
-                // Once: return to the start and stay static (#14)
+                // Один проход: как раньше - к концу, пауза, назад к началу и
+                // насовсем статично (#14). Второй копии тут не нужно, петля
+                // не замыкается
+                double scrollSeconds = Math.Max(1.5, overflow / 25.0);
+                double end = -(overflow + 12);
+                var anim = new DoubleAnimationUsingKeyFrames();
+                double t = 1.8;
+                anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+                anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
+                t += scrollSeconds;
+                anim.KeyFrames.Add(new LinearDoubleKeyFrame(end, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
+                t += 1.5;
+                anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(end, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
                 t += 0.6;
                 anim.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
-                // no RepeatBehavior -> runs once and HoldEnd pins it at X=0
+                anim.Duration = TimeSpan.FromSeconds(t);
+                TitleShift.BeginAnimation(TranslateTransform.XProperty, anim);
             }
             else
             {
-                anim.RepeatBehavior = RepeatBehavior.Forever; // continuous (default)
+                // Непрерывная лента: вторая копия названия стоит сразу за
+                // первой (через зазор gap) и едет на том же сдвиге. Когда
+                // первая копия уходит на -(textWidth+gap), вторая занимает
+                // ровно то место, где первая была при X=0 - RepeatBehavior
+                // прыгает обратно к X=0, но картинка от этого не меняется:
+                // видимый текст тот же самый. Отсюда лента без шва, а не
+                // прокрутка-до-конца-и-телепорт, как было раньше
+                const double Gap = 40;
+                double distance = textWidth + Gap;
+                TitleText2.Visibility = Visibility.Visible;
+                Canvas.SetLeft(TitleText2, distance);
+
+                double scrollSeconds = Math.Max(1.5, distance / 25.0);
+                var anim = new DoubleAnimationUsingKeyFrames();
+                double t = 1.8; // пауза на старте - прочитать название
+                anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+                anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
+                t += scrollSeconds;
+                anim.KeyFrames.Add(new LinearDoubleKeyFrame(-distance, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
+                anim.Duration = TimeSpan.FromSeconds(t);
+                anim.RepeatBehavior = RepeatBehavior.Forever;
+                TitleShift.BeginAnimation(TranslateTransform.XProperty, anim);
             }
-            anim.Duration = TimeSpan.FromSeconds(t);
-            TitleShift.BeginAnimation(TranslateTransform.XProperty, anim);
         }
         // No overflow: text parked at X=0 (the Canvas never truncates the rendering)
     }
