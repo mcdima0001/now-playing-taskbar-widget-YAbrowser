@@ -1731,7 +1731,7 @@ public partial class MainWindow : Window
         FillTitleRuns(TitleText2, title, version);
     }
 
-    private static void FillTitleRuns(TextBlock block, string title, string version)
+    private void FillTitleRuns(TextBlock block, string title, string version)
     {
         block.Inlines.Clear();
         block.Inlines.Add(new Run(title));
