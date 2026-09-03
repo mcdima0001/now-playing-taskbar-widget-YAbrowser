@@ -2061,11 +2061,15 @@ public partial class MainWindow : Window
                 anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.Zero)));
                 anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
                 t += scrollSeconds;
-                anim.KeyFrames.Add(new LinearDoubleKeyFrame(end, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
+                // Разгон и торможение, а не постоянная скорость - иначе
+                // остановка выглядела как удар о стену
+                anim.KeyFrames.Add(new EasingDoubleKeyFrame(end, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t)),
+                    new CubicEase { EasingMode = EasingMode.EaseInOut }));
                 t += 1.5;
                 anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(end, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
                 t += 0.6;
-                anim.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
+                anim.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t)),
+                    new CubicEase { EasingMode = EasingMode.EaseInOut }));
                 anim.Duration = TimeSpan.FromSeconds(t);
                 TitleShift.BeginAnimation(TranslateTransform.XProperty, anim);
             }
@@ -2089,7 +2093,10 @@ public partial class MainWindow : Window
                 anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.Zero)));
                 anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
                 t += scrollSeconds;
-                anim.KeyFrames.Add(new LinearDoubleKeyFrame(-distance, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
+                // Разгон из паузы и торможение перед следующей - без этого
+                // старт и остановка каждого витка выглядели как удар о стену
+                anim.KeyFrames.Add(new EasingDoubleKeyFrame(-distance, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t)),
+                    new CubicEase { EasingMode = EasingMode.EaseInOut }));
                 anim.Duration = TimeSpan.FromSeconds(t);
                 anim.RepeatBehavior = RepeatBehavior.Forever;
                 TitleShift.BeginAnimation(TranslateTransform.XProperty, anim);
