@@ -137,6 +137,7 @@ public partial class MainWindow : Window
     private DateTime _playToggledAt = DateTime.MinValue;
     private DateTime _likedOptimisticAt = DateTime.MinValue;
     private DateTime _shuffleToggledAt = DateTime.MinValue;
+    private DateTime _repeatToggledAt = DateTime.MinValue;
     private DateTime _seekAt = DateTime.MinValue;
 
     private bool AcceptPlayingState(bool incoming) =>
@@ -1108,23 +1109,36 @@ public partial class MainWindow : Window
     private void TrimEdgeButton(double trim)
     {
         // Порядок совпадает с разметкой; правое поле по умолчанию у части
-        // кнопок 2, у остальных 0
-        (Button Btn, double Right)[] tail =
+        // кнопок 2, у остальных 0. Ширина - своя у каждой: у значков 26, у
+        // круглой кнопки воспроизведения 30
+        (Button Btn, double Right, double Width)[] tail =
         {
-            (LikeButton, 2), (ShuffleButton, 2), (PrevButton, 2),
-            (PlayPauseButton, 2), (NextButton, 0), (RepeatButton, 0), (VolumeButton, 0),
+            (LikeButton, 2, 26), (ShuffleButton, 2, 26), (PrevButton, 2, 26),
+            (PlayPauseButton, 2, 30), (NextButton, 0, 26), (RepeatButton, 0, 26),
+            (VolumeButton, 0, 26),
         };
 
         Button? last = null;
-        foreach (var (btn, _) in tail)
+        foreach (var (btn, _, _) in tail)
             if (btn.Visibility == Visibility.Visible) last = btn;
 
-        foreach (var (btn, right) in tail)
+        foreach (var (btn, right, width) in tail)
         {
             var m = btn.Margin;
-            double want = ReferenceEquals(btn, last) ? -trim : right;
-            if (Math.Abs(m.Right - want) > 0.1)
-                btn.Margin = new Thickness(m.Left, m.Top, want, m.Bottom);
+            if (Math.Abs(m.Right - right) > 0.1)
+                btn.Margin = new Thickness(m.Left, m.Top, right, m.Bottom);
+
+            // Крайняя кнопка отдаёт часть СВОЕЙ ШИРИНЫ, а не поля. Раньше тут
+            // стояло отрицательное поле, и правый край кнопки уезжал за границу
+            // окна (Root справа без отступа, окно по SizeToContent): кусок
+            // кнопки оказывался вне HWND и мышь до него не доходила - ховер на
+            // крайней кнопке работал не по всей её площади.
+            // Круглую кнопку воспроизведения не трогаем: её фон в шаблоне жёстко
+            // 30x30, кружок вылез бы за уменьшенную кнопку
+            double want = ReferenceEquals(btn, last) && !ReferenceEquals(btn, PlayPauseButton)
+                ? width - trim
+                : width;
+            if (Math.Abs(btn.Width - want) > 0.1) btn.Width = want;
         }
     }
 
@@ -1157,9 +1171,14 @@ public partial class MainWindow : Window
         // сайта, которую нашло расширение. Без второго условия кнопка пропадала
         // всегда, когда десктопный Spotify не запущен
         Take(ref like, _settings.ShowLike && (_spotifyProc || _media.BrowserCanLike));
-        Take(ref shuffle, _settings.ShowShuffle);
-        Take(ref repeat, _settings.ShowRepeat);
-        Take(ref volume, _settings.ShowVolume && _spotifyProc); // internal volume: Spotify only
+        // Перемешивание и повтор: у Spotify через его интерфейс, у вкладки -
+        // через кнопки сайта. У Моей волны их нет вовсе, и тогда кнопки прячем,
+        // а не показываем мёртвыми
+        Take(ref shuffle, _settings.ShowShuffle && (_spotifyProc || _media.BrowserShuffle.Length > 0));
+        Take(ref repeat, _settings.ShowRepeat && (_spotifyProc || _media.BrowserRepeat.Length > 0));
+        // Громкость: у Spotify своя (его ползунок/микшер), у вкладки - ползунок
+        // сайта. Системный микшер для браузера не годится: он один на все вкладки
+        Take(ref volume, _settings.ShowVolume && (_spotifyProc || _media.BrowserCanVolume));
 
         // Maximum space the text column can take on this bar
         double room = Math.Min(MaxTextWidth, MinTextWidth + (avail - used));
@@ -1476,6 +1495,23 @@ public partial class MainWindow : Window
                 liked = true;
             _liked = liked;
 
+            // Во вкладке перемешивание и повтор читает расширение из вёрстки
+            // плеера; Spotify и его дерево доступности тут ни при чём
+            if (_media.UsingBrowser)
+            {
+                uiaMode = BrowserShuffleMode(_media.BrowserShuffle);
+                repeatMode = BrowserRepeatMode(_media.BrowserRepeat);
+                // Сайт перекрашивает кнопку не мгновенно, как и с лайком:
+                // первый отчёт после клика приходит ещё со старым состоянием
+                if (DateTime.UtcNow - _shuffleToggledAt < TimeSpan.FromSeconds(2.5))
+                    uiaMode = _uiaState.Shuffle;
+                if (DateTime.UtcNow - _repeatToggledAt < TimeSpan.FromSeconds(2.5))
+                    repeatMode = _uiaState.Repeat;
+                // Обратно в кеш: на нём строится и цикл по клику, и то самое
+                // окно доверия своему клику
+                _uiaState = (_uiaState.Liked, uiaMode, repeatMode);
+            }
+
             ApplyRepeatVisual(repeatMode);
 
             SetLikeIcon(liked);
@@ -1596,6 +1632,26 @@ public partial class MainWindow : Window
         PlayPauseIcon.Margin = playing ? new Thickness(0) : new Thickness(1.5, 0, 0, 0);
     }
 
+    /// <summary>Слова расширения в режимы виджета. "disabled" (сайт кнопку
+    /// погасил) и пустая строка дают Unknown - значок в этом случае серый,
+    /// то есть "состояние неизвестно", а не "выключено".</summary>
+    private static ShuffleMode BrowserShuffleMode(string s) => s switch
+    {
+        "on" => ShuffleMode.On,
+        "off" => ShuffleMode.Off,
+        _ => ShuffleMode.Unknown,
+    };
+
+    /// <summary>У Яндекса три положения повтора, как и у Spotify: выключен,
+    /// список, трек - ложатся один в один.</summary>
+    private static RepeatMode BrowserRepeatMode(string s) => s switch
+    {
+        "context" => RepeatMode.Context,
+        "one" => RepeatMode.Track,
+        "off" => RepeatMode.Off,
+        _ => RepeatMode.Unknown,
+    };
+
     private void ApplyShuffleVisual(ShuffleMode mode)
     {
         ShuffleIcon.Fill = mode switch
@@ -1666,11 +1722,13 @@ public partial class MainWindow : Window
 
     private async void Shuffle_Click(object sender, RoutedEventArgs e)
     {
-        // Immediate feedback: cycle locally; the state read corrects it if needed
+        bool browser = _media.UsingBrowser;
+        // Immediate feedback: cycle locally; the state read corrects it if needed.
+        // У сайта умного перемешивания нет - там цикл всего из двух положений
         var next = _uiaState.Shuffle switch
         {
             ShuffleMode.Off => ShuffleMode.On,
-            ShuffleMode.On => ShuffleMode.Smart,
+            ShuffleMode.On => browser ? ShuffleMode.Off : ShuffleMode.Smart,
             ShuffleMode.Smart => ShuffleMode.Off,
             _ => ShuffleMode.Unknown,
         };
@@ -1681,7 +1739,9 @@ public partial class MainWindow : Window
         }
         _shuffleToggledAt = DateTime.UtcNow;
 
-        bool ok = await Task.Run(() => _uia.CycleShuffle());
+        // В браузерном режиме дерево доступности Spotify не при делах: лезть в
+        // него незачем, а его пауза в полсекунды была бы видна на кнопке
+        bool ok = !browser && await Task.Run(() => _uia.CycleShuffle());
         if (!ok)
             await _media.ToggleShuffleAsync(); // no Spotify window: on/off only
         await Task.Delay(400);
@@ -1704,8 +1764,9 @@ public partial class MainWindow : Window
             _uiaState = (_uiaState.Liked, _uiaState.Shuffle, next);
             ApplyRepeatVisual(next);
         }
+        _repeatToggledAt = DateTime.UtcNow;
 
-        bool ok = await Task.Run(() => _uia.CycleRepeat());
+        bool ok = !_media.UsingBrowser && await Task.Run(() => _uia.CycleRepeat());
         if (!ok)
             await _media.CycleRepeatAsync(); // no Spotify window: try through SMTC
         await Task.Delay(400);
@@ -1869,9 +1930,14 @@ public partial class MainWindow : Window
         _volLoading = true;
         try
         {
-            // The CoreAudio fallback also off the UI thread - it is an RPC to the
-            // audio service and it did block the interface at times
-            double? current = await Task.Run(() => _uia.GetVolume() ?? SpotifyVolume.GetVolume());
+            // У вкладки громкость уже пришла в последнем отчёте расширения -
+            // ни UIA, ни микшер спрашивать не надо (и системный микшер тут
+            // всё равно один на весь браузер, а не на вкладку)
+            double? current = _media.UsingBrowser
+                ? _media.BrowserVolume
+                // The CoreAudio fallback also off the UI thread - it is an RPC to the
+                // audio service and it did block the interface at times
+                : await Task.Run(() => _uia.GetVolume() ?? SpotifyVolume.GetVolume());
             if (_closed || Visibility != Visibility.Visible)
                 return; // the widget hid during the read: do not open an orphan
                         // popup floating over the bar
@@ -1904,6 +1970,13 @@ public partial class MainWindow : Window
     /// </summary>
     private async void ApplyVolume(double fraction)
     {
+        // Вкладке громкость уходит одним сообщением расширению - очередь и
+        // поток не нужны, это не блокирующий вызов
+        if (_media.UsingBrowser)
+        {
+            _media.SetBrowserVolume(fraction);
+            return;
+        }
         _pendingVolume = fraction;
         if (_volApplying) return;
         _volApplying = true;
@@ -2227,6 +2300,50 @@ public partial class MainWindow : Window
         // Global state - another window (or Task Manager) may have changed it
         if (!PackagedApp.IsPackaged)
             AutoStartMenu.IsChecked = IsAutoStartEnabled();
+        if (Root.ContextMenu is { } menu) StartMenuWatchdog(menu);
+    }
+
+    private DispatcherTimer? _menuWatchdog;
+
+    /// <summary>
+    /// Закрывает меню по клику мимо него. Само WPF этого не делает: закрытие
+    /// держится на захвате мыши, а окно виджета висит с WS_EX_NOACTIVATE и
+    /// никогда не активируется - клик по чужому окну уходит сразу туда, и меню
+    /// оставалось висеть (закрывалось только кликом по панели задач, она под
+    /// виджетом). Тот же приём, что и у сторожа попапа громкости: пока меню
+    /// открыто, тикает таймер и смотрит, где нажали.
+    /// </summary>
+    private void StartMenuWatchdog(ContextMenu menu)
+    {
+        _menuWatchdog?.Stop();
+        _menuWatchdog = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(60) };
+        _menuWatchdog.Tick += (_, _) =>
+        {
+            if (!menu.IsOpen) { StopMenuWatchdog(); return; }
+            if (!Interop.AnyMouseButtonDown()) return;
+            if (!Interop.GetCursorPos(out var pt)) return;
+
+            // Своё же меню, его подменю и всплывающие подсказки - это отдельные
+            // окна нашего процесса. По ним закрывать нельзя: нажатие на пункт
+            // подменю не успело бы сработать. А вот клик по самому виджету
+            // меню закрывает, как и клик наружу
+            IntPtr under = Interop.WindowFromPoint(pt);
+            if (under != IntPtr.Zero && under != _hwnd)
+            {
+                Interop.GetWindowThreadProcessId(under, out uint pid);
+                if (pid == (uint)Environment.ProcessId) return;
+            }
+
+            StopMenuWatchdog();
+            menu.IsOpen = false;
+        };
+        _menuWatchdog.Start();
+    }
+
+    private void StopMenuWatchdog()
+    {
+        _menuWatchdog?.Stop();
+        _menuWatchdog = null;
     }
 
     /// <summary>One item PER EXISTING taskbar, with multiple selection - every
@@ -2288,7 +2405,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ContextMenu_Closed(object sender, RoutedEventArgs e) => RestoreForeground();
+    private void ContextMenu_Closed(object sender, RoutedEventArgs e)
+    {
+        StopMenuWatchdog();
+        RestoreForeground();
+    }
 
     private void CaptureForeground()
     {

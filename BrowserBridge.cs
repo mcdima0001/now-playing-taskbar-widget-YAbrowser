@@ -8,11 +8,15 @@ using System.Text.Json;
 namespace SpotifyTaskbarWidget;
 
 /// <summary>Снимок того, что играет во вкладке браузера.</summary>
+/// <param name="Shuffle">"off"/"on"/"disabled", либо пусто - у сайта такой
+/// кнопки нет (в Моей волне её и не бывает).</param>
+/// <param name="Repeat">"off"/"context"/"one"/"disabled", либо пусто.</param>
 public sealed record BrowserState(
     bool Playing, string Title, string Version, string Artist, string Art,
     double Position, double Duration,
     bool CanSeek, bool CanNext, bool CanPrev,
-    bool CanLike, bool? Liked, bool Explicit, DateTime At);
+    bool CanLike, bool? Liked, bool Explicit,
+    string Shuffle, string Repeat, bool CanVolume, double Volume, DateTime At);
 
 /// <summary>
 /// Приёмник данных от расширения Now Playing Bridge. Нужен для браузеров,
@@ -36,6 +40,7 @@ public sealed class BrowserBridge
     private readonly object _gate = new();
     private BrowserState? _state;
     private NetworkStream? _client;
+    private readonly SemaphoreSlim _sendGate = new(1, 1);
 
     /// <summary>Трек/состояние сменились.</summary>
     public event Action? Changed;
@@ -336,6 +341,10 @@ public sealed class BrowserBridge
                     CanLike: Bool(root, "canLike"),
                     Liked: BoolOrNull(root, "liked"),
                     Explicit: Bool(root, "explicit"),
+                    Shuffle: Str(root, "shuffle"),
+                    Repeat: Str(root, "repeat"),
+                    CanVolume: Bool(root, "canVolume"),
+                    Volume: Num(root, "volume"),
                     At: DateTime.UtcNow);
             }
             else return;
@@ -361,7 +370,12 @@ public sealed class BrowserBridge
                      prev.Art != next.Art || prev.Playing != next.Playing ||
                      prev.CanNext != next.CanNext || prev.CanPrev != next.CanPrev ||
                      prev.Liked != next.Liked || prev.CanLike != next.CanLike ||
-                     prev.Explicit != next.Explicit;
+                     prev.Explicit != next.Explicit ||
+                     prev.Shuffle != next.Shuffle || prev.Repeat != next.Repeat ||
+                     prev.CanVolume != next.CanVolume;
+        // Громкость нарочно не в списке: её крутят ползунком, и полное
+        // обновление на каждую сотую дёргало бы обложку и UIA. Значение
+        // читается напрямую в момент открытия попапа
         Trace($"-> playing={next?.Playing} title='{next?.Title}' dur={next?.Duration:F0} heavy={heavy}");
         if (heavy) Changed?.Invoke();
         else TimelineChanged?.Invoke();
@@ -384,20 +398,26 @@ public sealed class BrowserBridge
         : null;
 
     /// <summary>Шлёт команду расширению; молча уходит в никуда, если браузер
-    /// не подключён.</summary>
-    public void Send(string cmd, double? pos = null)
+    /// не подключён. Имя числового поля задаётся отдельно: перемотка ждёт
+    /// "pos", громкость - "value".</summary>
+    public void Send(string cmd, double? value = null, string valueName = "pos")
     {
         NetworkStream? stream;
         lock (_gate) stream = _client;
         if (stream == null) return;
 
-        string json = pos.HasValue
-            ? $"{{\"cmd\":\"{cmd}\",\"pos\":{pos.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}"
+        string json = value.HasValue
+            ? $"{{\"cmd\":\"{cmd}\",\"{valueName}\":{value.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}"
             : $"{{\"cmd\":\"{cmd}\"}}";
         _ = Task.Run(async () =>
         {
+            // По одному кадру за раз: перетаскивание ползунка громкости шлёт
+            // команды пачками, а две записи в один поток вперемешку - это
+            // порванный кадр и разорванное соединение
+            await _sendGate.WaitAsync();
             try { await SendFrameAsync(stream, 0x1, Encoding.UTF8.GetBytes(json), CancellationToken.None); }
             catch { lock (_gate) { if (ReferenceEquals(_client, stream)) _client = null; } }
+            finally { _sendGate.Release(); }
         });
     }
 }

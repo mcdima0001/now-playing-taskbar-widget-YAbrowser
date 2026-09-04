@@ -164,6 +164,26 @@ internal static class Interop
     [DllImport("user32.dll")]
     public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, UIntPtr dwExtraInfo);
 
+    /// <summary>Окно под курсором. Нужно, чтобы отличить клик по своему меню
+    /// от клика в чужое приложение: окно виджета висит с WS_EX_NOACTIVATE и
+    /// захват мыши не удерживает, поэтому WPF о таком клике не узнаёт.</summary>
+    [DllImport("user32.dll")]
+    public static extern IntPtr WindowFromPoint(POINT point);
+
+    /// <summary>Старший бит - кнопка нажата прямо сейчас.</summary>
+    [DllImport("user32.dll")]
+    public static extern short GetAsyncKeyState(int vKey);
+
+    public const int VK_LBUTTON = 0x01;
+    public const int VK_RBUTTON = 0x02;
+    public const int VK_MBUTTON = 0x04;
+
+    /// <summary>Любая кнопка мыши нажата в этот момент.</summary>
+    public static bool AnyMouseButtonDown() =>
+        (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0 ||
+        (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0 ||
+        (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0;
+
     public const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     public const uint MOUSEEVENTF_LEFTUP = 0x0004;
 

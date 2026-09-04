@@ -3,7 +3,7 @@
 
 #define MyAppName "Now Playing Taskbar Widget (Yandex Browser)"
 #define MyAppShortName "NowPlayingWidget"
-#define MyAppVersion "1.3.0"
+#define MyAppVersion "1.6.0"
 #define MyAppPublisher "mcdima0001"
 #define MyAppURL "https://github.com/mcdima0001/now-playing-taskbar-widget-YAbrowser"
 #define MyAppExeName "SpotifyTaskbarWidget.exe"

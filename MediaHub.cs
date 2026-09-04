@@ -21,9 +21,22 @@ public sealed class MediaHub
     public event Action? Changed;
     public event Action? TimelineChanged;
 
-    /// <summary>Трек сейчас берётся из браузера: shuffle и repeat в этом
-    /// режиме недоступны, окно их гасит.</summary>
+    /// <summary>Трек сейчас берётся из браузера.</summary>
     public bool UsingBrowser => _useBrowser;
+
+    /// <summary>Перемешивание во вкладке: "off"/"on"/"disabled", либо пусто -
+    /// у сайта такой кнопки нет. В Моей волне её не бывает вовсе.</summary>
+    public string BrowserShuffle => _useBrowser ? _browser.Current?.Shuffle ?? "" : "";
+
+    /// <summary>Повтор во вкладке: "off"/"context"/"one"/"disabled" либо пусто.</summary>
+    public string BrowserRepeat => _useBrowser ? _browser.Current?.Repeat ?? "" : "";
+
+    /// <summary>У вкладки есть чем крутить громкость - свой ползунок либо
+    /// сам медиаэлемент.</summary>
+    public bool BrowserCanVolume => _useBrowser && _browser.Current is { CanVolume: true };
+
+    /// <summary>Громкость вкладки, 0..1.</summary>
+    public double BrowserVolume => _useBrowser ? _browser.Current?.Volume ?? 1 : 1;
 
     /// <summary>Избранное во вкладке: true/false, либо null - сайт не сообщает
     /// (нет кнопки), и тогда окно показывает нейтральный плюс.</summary>
@@ -173,14 +186,25 @@ public sealed class MediaHub
         catch { return false; }
     }
 
-    // Перемешивания и повтора у вкладки нет - в браузерном режиме просто тихо
+    /// <summary>Повтор: во вкладке это клик по кнопке сайта, и сайт сам ведёт
+    /// цикл выкл -> список -> трек. Виджет только просит следующий шаг.</summary>
     public async Task CycleRepeatAsync()
     {
-        if (!_useBrowser) await _smtc.CycleRepeatAsync();
+        if (_useBrowser) _browser.Send("repeat");
+        else await _smtc.CycleRepeatAsync();
     }
 
     public async Task ToggleShuffleAsync()
     {
-        if (!_useBrowser) await _smtc.ToggleShuffleAsync();
+        if (_useBrowser) _browser.Send("shuffle");
+        else await _smtc.ToggleShuffleAsync();
+    }
+
+    /// <summary>Громкость вкладки, 0..1. У Яндекса это его собственный
+    /// ползунок, у обычного сайта - громкость медиаэлемента; системный
+    /// микшер тут ни при чём, браузер в нём один на все вкладки.</summary>
+    public void SetBrowserVolume(double fraction)
+    {
+        if (_useBrowser) _browser.Send("volume", Math.Clamp(fraction, 0, 1), "value");
     }
 }

@@ -31,6 +31,25 @@
            one('[class*="VibePlayerbarMeta_root"]');
   }
 
+  // Перемешивание и повтор ищутся по значку, а не по подписи: подписи у
+  // Яндекса русские ("В случайном порядке") и уедут при смене языка, а класс
+  // значка заодно НЕСЁТ состояние - ShuffleButton_shuffleIcon_on__aBcDe
+  function iconButton(bar, prefix) {
+    const svg = bar ? bar.querySelector(`svg[class*="${prefix}"]`) : null;
+    return svg ? svg.closest('button') : null;
+  }
+
+  // Суффикс класса значка: off/on/disabled у перемешивания,
+  // none/context/one/disabled у повтора. Пустая строка - кнопки нет
+  function iconState(btn, prefix) {
+    if (!btn) return '';
+    const svg = btn.querySelector(`svg[class*="${prefix}"]`);
+    // className у SVG - объект SVGAnimatedString, читаем атрибут
+    const cls = svg ? String(svg.getAttribute('class') || '') : '';
+    const m = cls.match(new RegExp(prefix + '_([a-z]+)'));
+    return m ? m[1] : '';
+  }
+
   const SITES = [
     {
       host: /(^|\.)music\.yandex\.(ru|com|by|kz|uz)$/,
@@ -49,6 +68,11 @@
           prev: inBar('button[aria-label="Предыдущая песня"]') || skip[0] || null,
           next: inBar('button[aria-label="Следующая песня"]') || skip[1] || null,
           like: inBar('button[aria-label="Нравится"]'),
+          shuffle: iconButton(bar, 'ShuffleButton_shuffleIcon'),
+          repeat: iconButton(bar, 'RepeatButton_repeatIcon'),
+          // Ползунок громкости - такой же input[type=range], как полоса
+          // прогресса, поэтому берём его по классу, а не перебором
+          volume: inBar('input[class*="ChangeVolume_slider"]'),
         };
       },
     },
@@ -176,6 +200,32 @@
     return { canLike: true, liked: pressed === null ? null : pressed === 'true' };
   }
 
+  // Перемешивание и повтор. Наружу уходят общие слова, а не классы Яндекса:
+  // 'off'/'on' и 'off'/'context'/'one', плюс 'disabled', когда сайт кнопку
+  // погасил (у Моей волны их нет вовсе - тогда пустая строка)
+  function shuffleState() {
+    const s = iconState(controls().shuffle, 'ShuffleButton_shuffleIcon');
+    return s === 'on' || s === 'off' || s === 'disabled' ? s : '';
+  }
+
+  function repeatState() {
+    const s = iconState(controls().repeat, 'RepeatButton_repeatIcon');
+    if (s === 'none') return 'off';
+    return s === 'context' || s === 'one' || s === 'disabled' ? s : '';
+  }
+
+  // Громкость 0..1. У сайта со своим плеером её держит ползунок (у Яндекса
+  // max=1, шаг 0.01), у обычного сайта - сам медиаэлемент
+  function volumeState(el) {
+    const slider = controls().volume;
+    if (slider) {
+      const v = parseFloat(slider.value);
+      if (isFinite(v)) return { canVolume: true, volume: Math.max(0, Math.min(1, v)) };
+    }
+    if (el) return { canVolume: true, volume: el.muted ? 0 : el.volume };
+    return { canVolume: false, volume: 0 };
+  }
+
   // Пометка о ненормативной лексике. В mediaSession её нет, поэтому смотрим
   // вёрстку: у Яндекса это svg с классом ExplicitMarkIcon_explicitMark и
   // подписью "Возрастное ограничение 18+". Такие же значки стоят у треков в
@@ -247,8 +297,11 @@
         canNext: !!controls().next,
         canPrev: !!controls().prev,
         explicit: explicitMark(),
+        shuffle: shuffleState(),
+        repeat: repeatState(),
         v: VERSION,
         ...likeState(),
+        ...volumeState(null),
         host: location.hostname,
       };
     }
@@ -268,14 +321,19 @@
       canNext: !!controls().next,
       canPrev: !!controls().prev,
       explicit: explicitMark(),
+      shuffle: shuffleState(),
+      repeat: repeatState(),
       v: VERSION,
       ...likeState(),
+      ...volumeState(el),
       host: location.hostname,
     };
   }
 
   function key(s) {
-    return [s.playing, s.title, s.version, s.artist, s.art, Math.round(s.duration), s.canNext, s.canPrev, s.liked, s.explicit].join('|');
+    return [s.playing, s.title, s.version, s.artist, s.art, Math.round(s.duration),
+            s.canNext, s.canPrev, s.liked, s.explicit,
+            s.shuffle, s.repeat, Math.round(s.volume * 100)].join('|');
   }
 
   function send(state, why) {
@@ -343,6 +401,15 @@
       if (b) b.click();
     } else if (msg && msg.cmd === 'like') {
       if (c.like) c.like.click();
+    } else if (msg && (msg.cmd === 'shuffle' || msg.cmd === 'repeat')) {
+      // Погашенную кнопку не жмём: сайт клик проглотит, а виджет успеет
+      // нарисовать себе новое состояние и потом дёрнуться обратно
+      const b = msg.cmd === 'shuffle' ? c.shuffle : c.repeat;
+      if (b && !b.disabled && b.getAttribute('data-disabled') !== 'true') b.click();
+    } else if (msg && msg.cmd === 'volume' && isFinite(msg.value)) {
+      const v = Math.max(0, Math.min(1, msg.value));
+      if (c.volume) setRangeValue(c.volume, v);
+      else if (el) { try { el.muted = false; el.volume = v; } catch {} }
     }
     // Состояние после команды - сразу, без ожидания тика
     const s = snapshot();
