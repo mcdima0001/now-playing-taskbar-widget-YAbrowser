@@ -16,10 +16,16 @@ public partial class App : Application
         _mutex = new Mutex(true, "SpotifyTaskbarWidget_SingleInstance", out bool isNew);
         if (!isNew)
         {
+            Diag.Log("Another copy is already running — exiting.");
             IntentionalExit = true;
             Shutdown();
             return;
         }
+
+        // Отметка о старте: по ней в логе видно, когда виджет поднялся и когда
+        // ушёл. Без неё исчезнувший процесс не отличить от никогда не
+        // запускавшегося - на это уже потратили полдня
+        Diag.Log($"Started, version {System.Reflection.Assembly.GetExecutingAssembly().GetName().Version}.");
 
         // The window can be destroyed by an Explorer restart (it is owned by
         // the taskbar) and recreated - the app only exits when the user says so

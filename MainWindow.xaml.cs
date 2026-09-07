@@ -3191,6 +3191,9 @@ public partial class MainWindow : Window
 
     private void Exit_Click(object sender, RoutedEventArgs e)
     {
+        // В лог пишутся ВСЕ выходы: иначе исчезнувший виджет неотличим от
+        // упавшего, а падение оставляет след в журналах Windows, выход - нет
+        Diag.Log("Quit from the menu.");
         App.IntentionalExit = true;
         Application.Current.Shutdown();
     }
@@ -3233,16 +3236,26 @@ public partial class MainWindow : Window
     {
         try
         {
-            for (int i = 0; i < 120; i++)
+            Diag.Log("Widget window destroyed (taskbar gone) — waiting for the bar to come back.");
+            // Ждём долго. Раньше стояло 120 секунд, после чего приложение
+            // молча выходило - и виджет просто исчезал без следа, если панель
+            // задерживалась (перезапуск проводника под нагрузкой, выход из
+            // долгого сна). Час ожидания дешевле: процесс на паузе ничего не
+            // ест, а вернуться сам он уже не может
+            for (int i = 0; i < 3600; i++)
             {
                 await Task.Delay(1000);
                 if (Interop.FindWindow("Shell_TrayWnd", null) != IntPtr.Zero)
                 {
                     await Task.Delay(2000); // let the bar (and the secondaries) settle
+                    if (i > 10) Diag.Log($"Taskbar came back after {i}s — recreating the widget.");
                     SyncToMonitors();
+                    if (!HasWindows)
+                        Diag.Log("Taskbar is back but no widget window could be created.");
                     return;
                 }
             }
+            Diag.Log("No taskbar for an hour — giving up and exiting.");
             App.IntentionalExit = true;
             Application.Current.Shutdown();
         }
