@@ -2070,13 +2070,75 @@ public partial class MainWindow : Window
         PlayPauseButton.Background = light ? Brushes.Black : Brushes.White;
         PlayPauseIcon.Fill = light ? Brushes.White : Brushes.Black;
 
-        _marqueeKey = ""; // no effect on the text, but forces a coherent refresh
+        ResetMarquee(); // no effect on the text, but forces a coherent refresh
         _ = RefreshTrackAsync();
     }
 
     // ---------- Title marquee ----------
 
     private string _marqueeKey = "";
+    /// <summary>Тождество самого текста - без ширины колонки. По нему видно,
+    /// сменился трек или всего лишь переехали якоря панели задач.</summary>
+    /// <summary>
+    /// Скорость ленты в пикселях в секунду - единственная ручка, которой
+    /// крутится темп. Ниже ~20 px/с начинают быть заметны ступеньки: у окна
+    /// стоит TextFormattingMode=Display, глифы сидят на пиксельной сетке, и
+    /// текст двигается ЦЕЛЫМИ пикселями (замерено по записи покадрово). На
+    /// такой скорости шаг приходится примерно на каждый кадр и не читается.
+    /// Субпиксельный режим Ideal проблему тоже решает, но заметно меняет
+    /// насыщенность мелкого шрифта - пробовали, выглядит жирнее.
+    /// </summary>
+    private const double ScrollSpeed = 85;
+
+    private string _marqueeTextKey = "";
+    private bool _marqueeRunning;
+    private double _marqueeTextWidth;
+    private double _marqueeLapSeconds;
+    private DateTime _marqueeLapStartedAt;
+    private DispatcherTimer? _marqueeStopTimer;
+
+    /// <summary>Забыть и текст, и ширину - следующий вызов пересоберёт ленту
+    /// с нуля. Нужно там, где поменялся шрифт, режим прокрутки или отступы.</summary>
+    private void ResetMarquee()
+    {
+        _marqueeKey = "";
+        _marqueeTextKey = "";
+    }
+
+    /// <summary>
+    /// Досмотреть текущий виток и встать статично. Виток кончается сдвигом на
+    /// -distance, сразу после чего лента прыгает к нулю и стоит 1.8 с - в эти
+    /// секунды картинка ровно та же, что у статичного текста, и остановка
+    /// незаметна. Целимся в начало этой паузы с запасом: поймать момент ДО
+    /// прыжка нельзя, там текст ещё уехавший и остановка была бы рывком.
+    /// </summary>
+    private void ScheduleMarqueeStop()
+    {
+        if (_marqueeStopTimer != null) return; // конца витка уже ждём
+        if (!(_marqueeLapSeconds > 0)) { ParkMarquee(); return; }
+        double passed = (DateTime.UtcNow - _marqueeLapStartedAt).TotalSeconds % _marqueeLapSeconds;
+        _marqueeStopTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(_marqueeLapSeconds - passed + 0.15),
+        };
+        _marqueeStopTimer.Tick += (_, _) => ParkMarquee();
+        _marqueeStopTimer.Start();
+    }
+
+    private void CancelMarqueeStop()
+    {
+        _marqueeStopTimer?.Stop();
+        _marqueeStopTimer = null;
+    }
+
+    private void ParkMarquee()
+    {
+        CancelMarqueeStop();
+        _marqueeRunning = false;
+        TitleShift.BeginAnimation(TranslateTransform.XProperty, null);
+        TitleShift.X = 0;
+        TitleText2.Visibility = Visibility.Collapsed;
+    }
 
     /// <summary>Title wider than the text column -> continuous scroll with pauses,
     /// like Spotify; otherwise it stays static.</summary>
@@ -2094,9 +2156,44 @@ public partial class MainWindow : Window
         double clipWidth = Math.Max(0, column - badge);
         // DPI goes into the key: the rendered width changes with the monitor
         // scale and the scroll decision went stale when moving screens
-        string key = $"{_titleShown}|{clipWidth:0}|{badge:0}|{VisualTreeHelper.GetDpi(this).PixelsPerDip:0.##}|{TitleText.FontFamily.Source}";
+        string textKey = $"{_titleShown}|{VisualTreeHelper.GetDpi(this).PixelsPerDip:0.##}|{TitleText.FontFamily.Source}";
+        string key = $"{textKey}|{clipWidth:0}|{badge:0}";
         if (key == _marqueeKey) return;
+        // Текст тот же, поменялась только ширина колонки - это переехали якоря
+        // панели задач, а не сменился трек
+        bool widthOnly = textKey == _marqueeTextKey;
         _marqueeKey = key;
+        _marqueeTextKey = textKey;
+
+        // Лента уже едет, а изменилась только ширина окошка. Перезапускать её
+        // нельзя: именно это и швыряло текст в начало каждый раз, когда
+        // виджет менял размер вслед за панелью задач
+        if (widthOnly && _marqueeRunning && !_settings.ScrollTitleOnce)
+        {
+            // Ширину текста берём из кеша, а не мерим заново: текст тот же,
+            // а виток уже построен по этой ширине - пересчёт дал бы разве что
+            // расхождение на пиксель округления
+            double running = Math.Min(_marqueeTextWidth, clipWidth);
+            if (!(running > 0)) running = clipWidth;
+            TitleClip.Width = running;
+            if (_marqueeTextWidth - clipWidth > 4)
+            {
+                // Места по-прежнему не хватает. Длина витка считается от
+                // ширины САМОГО текста, а она не менялась - анимация как шла,
+                // так и идёт, трогать нечего
+                CancelMarqueeStop();
+            }
+            else
+            {
+                // Текст теперь помещается целиком: доехать этот виток и встать
+                ScheduleMarqueeStop();
+            }
+            return;
+        }
+
+        // Полная пересборка: сменился трек, шрифт или режим прокрутки
+        CancelMarqueeStop();
+        _marqueeRunning = false;
 
         // Measure the width that is REALLY rendered. The window uses
         // TextFormattingMode=Display (pixel-snapped advances) and FormattedText
@@ -2107,19 +2204,20 @@ public partial class MainWindow : Window
         // what gets drawn (it sits in a Canvas, the layout no longer constrains it).
         TitleText.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         double textWidth = Math.Ceiling(TitleText.DesiredSize.Width);
-
-        TitleShift.BeginAnimation(TranslateTransform.XProperty, null);
-        TitleShift.X = 0;
-        TitleText2.Visibility = Visibility.Collapsed;
+        _marqueeTextWidth = textWidth;
 
         // Колонка названия ужимается до текста - тогда значок стоит вплотную
         // за ним; шире доступного места не растём, иначе поедут кнопки.
         // Ноль недопустим: это снова спрятало бы текст
         double titleWidth = Math.Min(textWidth, clipWidth);
         if (!(titleWidth > 0)) titleWidth = clipWidth;
+        double overflow = textWidth - clipWidth;
+
+        TitleShift.BeginAnimation(TranslateTransform.XProperty, null);
+        TitleShift.X = 0;
+        TitleText2.Visibility = Visibility.Collapsed;
         TitleClip.Width = titleWidth;
 
-        double overflow = textWidth - clipWidth;
         if (overflow > 4)
         {
             if (_settings.ScrollTitleOnce)
@@ -2160,19 +2258,40 @@ public partial class MainWindow : Window
                 TitleText2.Visibility = Visibility.Visible;
                 Canvas.SetLeft(TitleText2, distance);
 
-                double scrollSeconds = Math.Max(1.5, distance / 25.0);
+                double scrollSeconds = Math.Max(1.2, distance / ScrollSpeed);
                 var anim = new DoubleAnimationUsingKeyFrames();
                 double t = 1.8; // пауза на старте - прочитать название
                 anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.Zero)));
                 anim.KeyFrames.Add(new DiscreteDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
-                t += scrollSeconds;
-                // Разгон из паузы и торможение перед следующей - без этого
-                // старт и остановка каждого витка выглядели как удар о стену
+
+                // Разгон и торможение - короткими участками по краям, а не
+                // одной кривой на всю прокрутку: у той скорость на хвостах
+                // падала почти до нуля, и текст полз по пикселю раз в треть
+                // секунды. Между ними ход равномерный.
+                // Квадратичная кривая, а не кубическая: у неё скорость растёт
+                // равномерно, и медленный участок в начале вдвое короче
+                double ramp = Math.Min(0.45, scrollSeconds / 5);
+                // Без излома на стыке: у квадратичной кривой скорость на
+                // выходе равна 2*путь/время, отсюда путь разгона speed*ramp/2
+                double speed = distance / (scrollSeconds - ramp);
+                double rampDist = speed * ramp / 2;
+                t += ramp;
+                anim.KeyFrames.Add(new EasingDoubleKeyFrame(-rampDist, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t)),
+                    new QuadraticEase { EasingMode = EasingMode.EaseIn }));
+                t += scrollSeconds - 2 * ramp;
+                anim.KeyFrames.Add(new LinearDoubleKeyFrame(-(distance - rampDist),
+                    KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t))));
+                t += ramp;
                 anim.KeyFrames.Add(new EasingDoubleKeyFrame(-distance, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(t)),
-                    new CubicEase { EasingMode = EasingMode.EaseInOut }));
+                    new QuadraticEase { EasingMode = EasingMode.EaseOut }));
                 anim.Duration = TimeSpan.FromSeconds(t);
                 anim.RepeatBehavior = RepeatBehavior.Forever;
                 TitleShift.BeginAnimation(TranslateTransform.XProperty, anim);
+                // Длина витка и момент старта - по ним считается, сколько
+                // осталось доехать, когда место вдруг нашлось
+                _marqueeRunning = true;
+                _marqueeLapSeconds = t;
+                _marqueeLapStartedAt = DateTime.UtcNow;
             }
         }
         // No overflow: text parked at X=0 (the Canvas never truncates the rendering)
@@ -2274,7 +2393,7 @@ public partial class MainWindow : Window
     {
         _settings.ScrollTitleOnce = ScrollOnceMenu.IsChecked;
         _settings.Save();
-        _marqueeKey = ""; // force the animation to be recomputed with the new mode
+        ResetMarquee(); // force the animation to be recomputed with the new mode
         UpdateMarquee();
     }
 
@@ -2834,7 +2953,7 @@ public partial class MainWindow : Window
         _settings.TextPadding = Math.Clamp(e.NewValue, 0, 40);
         TextPadValueText.Text = $"{Math.Round(e.NewValue)} px";
         // The text column changes width: redo the layout now
-        _marqueeKey = "";
+        ResetMarquee();
         UpdatePosition();
         _textPadSaveTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _textPadSaveTimer.Stop();
@@ -2898,7 +3017,7 @@ public partial class MainWindow : Window
         _settings.AutoSizeText = AutoSizeMenu.IsChecked;
         _settings.Save();
         // The column changes width now, without waiting for the next track
-        _marqueeKey = "";
+        ResetMarquee();
         UpdatePosition();
     }
 
