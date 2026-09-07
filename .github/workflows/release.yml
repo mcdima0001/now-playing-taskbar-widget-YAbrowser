@@ -17,9 +17,9 @@ jobs:
     # Только Windows: WPF на других системах не собирается
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "8.0.x"
 
@@ -34,21 +34,21 @@ jobs:
         # переменную ProgramFiles и текст "(x86)" следом
         run: '& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" setup.iss'
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: installer
           path: installer/*.exe
 
       # Отдельно - голый exe: им удобно обновить уже установленный виджет,
       # не гоняя установщик
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: widget-exe
           path: publish/SpotifyTaskbarWidget.exe
 
       - name: Публикация релиза
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: installer/*.exe
           generate_release_notes: true
