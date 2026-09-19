@@ -9,8 +9,54 @@ const PULL_MS = 4000;
 // Вкладка может быть заморожена (экономия памяти) и не отвечать на опрос -
 // это ещё не повод её хоронить, ждём минуту
 const SILENCE_MS = 60000;
+// Вкладка, из которой минуту не идёт звук, перестаёт претендовать на виджет.
+// Без этого несколько открытых ютубов воевали за него: виджет мигал между
+// ними, хотя звучал один. Признак берём у самого браузера (tab.audible), а не
+// из флага проигрывания со страницы - у замьюченной или домолчавшей вкладки
+// флаг вполне остаётся выставленным, и как раз они и воевали
+const QUIET_MS = 60000;
+// Исключение - Яндекс Музыка: у неё пауза живёт сколько угодно, виджет нарочно
+// продолжает показывать трек, пока держится соединение
+const KEEPS_PAUSED = /(^|\.)music\.yandex\.(ru|com|by|kz|uz)$/;
 
-const tabs = new Map(); // "tabId:frameId" -> { state, ts, tabId, frameId }
+// "tabId:frameId" -> { state, ts, firstSeen, audible, lastAudibleAt,
+//                      tabId, windowId, frameId }
+const tabs = new Map();
+
+function keepsPaused(v) {
+  return KEEPS_PAUSED.test((v.state && v.state.host) || '');
+}
+
+// Кто сейчас звучит. Один запрос на все вкладки, а не по одному на каждую
+async function refreshAudible() {
+  let ids;
+  try {
+    ids = new Set((await chrome.tabs.query({ audible: true })).map(t => t.id));
+  } catch {
+    return; // прав нет или браузер закрывается - молча
+  }
+  const now = Date.now();
+  for (const v of tabs.values()) {
+    v.audible = ids.has(v.tabId);
+    if (v.audible) v.lastAudibleAt = now;
+  }
+}
+
+// Забыть вкладки, которые давно не звучат. Возвращает true, если кого-то убрали
+function dropQuiet() {
+  const now = Date.now();
+  let dropped = false;
+  for (const [k, v] of [...tabs]) {
+    if (keepsPaused(v)) continue;
+    // Только что найденной вкладке даём ту же минуту: звучит она или нет,
+    // мы ещё не знаем - опрос мог не успеть пройти
+    if (now - v.firstSeen < QUIET_MS) continue;
+    if (now - v.lastAudibleAt <= QUIET_MS) continue;
+    tabs.delete(k);
+    dropped = true;
+  }
+  return dropped;
+}
 let ws = null;
 let retry = 1000;
 let lastSentKey = '';
@@ -20,13 +66,16 @@ function idOf(sender) {
   return `${sender.tab ? sender.tab.id : 0}:${sender.frameId || 0}`;
 }
 
-// Текущая = играющая с самым свежим отчётом; если играющих нет - самая свежая
+// Текущая: сначала та, что реально звучит, потом играющая по своим данным,
+// при равенстве - с самым свежим отчётом
 function current() {
   const now = Date.now();
   let best = null;
   for (const [k, v] of tabs) {
     if (now - v.ts > STALE_MS) { tabs.delete(k); continue; }
     if (!best) { best = v; continue; }
+    // Звук важнее всего: пользователь слышит именно эту вкладку
+    if (!!v.audible !== !!best.audible) { if (v.audible) best = v; continue; }
     const bp = best.state.playing, vp = v.state.playing;
     if (vp !== bp) { if (vp) best = v; continue; }
     if (v.ts > best.ts) best = v;
@@ -59,6 +108,11 @@ function push(force) {
 // не трогает, в отличие от таймеров внутри страницы. Ответ вкладка присылает
 // обычным state-сообщением, поэтому здесь важен только сам факт отказа
 async function pull() {
+  if (!tabs.size) return;
+  // Сначала разбираемся, кто звучит, и выкидываем замолчавших - опрашивать и
+  // учитывать их дальше незачем
+  await refreshAudible();
+  if (dropQuiet()) push(true);
   if (!tabs.size) return;
   const now = Date.now();
   for (const [k, v] of [...tabs]) {
@@ -131,9 +185,15 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
     tabs.delete(id);
     push(true);
   } else if (msg.type === 'state') {
+    const prev = tabs.get(id);
     tabs.set(id, {
       state: msg.state,
       ts: Date.now(),
+      // Отметки о звуке переносим со старой записи: их обновляет опрос, а
+      // отчёты от вкладки приходят чаще и ничего о звуке не знают
+      firstSeen: prev ? prev.firstSeen : Date.now(),
+      audible: prev ? prev.audible : false,
+      lastAudibleAt: prev ? prev.lastAudibleAt : 0,
       tabId: sender.tab ? sender.tab.id : 0,
       windowId: sender.tab ? sender.tab.windowId : null,
       frameId: sender.frameId || 0,
@@ -148,6 +208,21 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
 chrome.tabs.onRemoved.addListener(tabId => {
   for (const k of [...tabs.keys()]) if (k.startsWith(`${tabId}:`)) tabs.delete(k);
   push(true);
+});
+
+// Звук появился или пропал - узнаём сразу, не дожидаясь очередного опроса:
+// переключение между вкладками должно быть мгновенным
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (info.audible === undefined) return;
+  const now = Date.now();
+  let touched = false;
+  for (const v of tabs.values()) {
+    if (v.tabId !== tabId) continue;
+    v.audible = info.audible;
+    if (info.audible) v.lastAudibleAt = now;
+    touched = true;
+  }
+  if (touched) push(false);
 });
 
 // Service worker засыпает; будильник поднимает его и восстанавливает сокет
