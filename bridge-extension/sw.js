@@ -157,13 +157,23 @@ function connect() {
     const cur = current();
     if (!cur || !msg || !msg.cmd) return;
     if (msg.cmd === 'focus') {
-      // Показать источник звука: активировать вкладку и поднять её окно.
-      // Виджет перед отправкой снимает запрет на смену активного окна,
-      // иначе Windows разрешит браузеру только мигнуть на панели задач
-      chrome.tabs.update(cur.tabId, { active: true }).catch(() => {});
-      if (cur.windowId != null) {
-        chrome.windows.update(cur.windowId, { focused: true, drawAttention: true }).catch(() => {});
-      }
+      // Показать источник звука: активировать вкладку и её окно. Без
+      // drawAttention - он и был тем самым миганием на панели задач. Поднять
+      // окно на передний план браузеру Windows всё равно не даёт (он фоновый
+      // процесс), поэтому это делает виджет: отдаём ему заголовок вкладки,
+      // по нему он найдёт нужное окно среди нескольких
+      const target = cur;
+      (async () => {
+        try { await chrome.tabs.update(target.tabId, { active: true }); } catch {}
+        if (target.windowId != null) {
+          try { await chrome.windows.update(target.windowId, { focused: true }); } catch {}
+        }
+        let title = '';
+        try { title = (await chrome.tabs.get(target.tabId)).title || ''; } catch {}
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'focused', title }));
+        }
+      })();
       return;
     }
     chrome.tabs.sendMessage(cur.tabId, msg, { frameId: cur.frameId }).catch(() => {});

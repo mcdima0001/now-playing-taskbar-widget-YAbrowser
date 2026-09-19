@@ -47,6 +47,11 @@ public sealed class BrowserBridge
     /// <summary>Пришла только новая позиция - обработчик должен быть лёгким.</summary>
     public event Action? TimelineChanged;
 
+    /// <summary>Расширение активировало вкладку по команде "focus" и прислало
+    /// её заголовок: окно на передний план поднимает уже виджет. Приходит из
+    /// потока сокета.</summary>
+    public event Action<string>? FocusReady;
+
     /// <summary>Состояние на паузе живёт, пока держится соединение: браузер
     /// душит таймеры в замолчавшей фоновой вкладке, и отчёты оттуда приходят
     /// раз в минуту - виджет от таймаута мигал. Признак живости честнее -
@@ -321,6 +326,12 @@ public sealed class BrowserBridge
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
             string type = root.TryGetProperty("type", out var t) ? t.GetString() ?? "" : "";
+            if (type == "focused")
+            {
+                // Ответ на "focus", а не состояние - трек не трогаем
+                FocusReady?.Invoke(Str(root, "title"));
+                return;
+            }
             if (type == "idle")
             {
                 next = null;

@@ -59,6 +59,7 @@ public sealed class MediaHub
         _smtc.TimelineChanged += () => TimelineChanged?.Invoke();
         _browser.Changed += () => Changed?.Invoke();
         _browser.TimelineChanged += () => TimelineChanged?.Invoke();
+        _browser.FocusReady += OnBrowserFocused;
         _browser.Start();
         await _smtc.InitializeAsync();
     }
@@ -165,6 +166,22 @@ public sealed class MediaHub
     public void ToggleBrowserLike()
     {
         if (_useBrowser) _browser.Send("like");
+    }
+
+    /// <summary>Вкладка активирована - поднять её окно. Через поток интерфейса:
+    /// AttachThreadInput требует очереди сообщений у своего потока, а у потока
+    /// сокета её нет. Небольшая пауза - браузер переписывает заголовок окна на
+    /// заголовок вкладки не мгновенно, а по нему ищется нужное окно.</summary>
+    private static void OnBrowserFocused(string tabTitle)
+    {
+        var app = System.Windows.Application.Current;
+        if (app == null) return;
+        app.Dispatcher.InvokeAsync(async () =>
+        {
+            await Task.Delay(120);
+            try { SourceActivator.BringBrowserToFront(tabTitle); }
+            catch (Exception ex) { Diag.Once("browser-front", "Bringing the browser to front failed: " + ex.Message); }
+        });
     }
 
     /// <summary>Показать то, откуда идёт звук: вкладку браузера через

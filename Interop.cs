@@ -164,6 +164,21 @@ internal static class Interop
     [DllImport("user32.dll")]
     public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, UIntPtr dwExtraInfo);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int maxCount);
+
+    /// <summary>Привязать очередь ввода своего потока к чужому. На время
+    /// привязки поток считается "тем же", что держит передний план, и
+    /// SetForegroundWindow проходит там, где Windows его запрещает.</summary>
+    [DllImport("user32.dll")]
+    public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("kernel32.dll")]
+    public static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    public static extern bool BringWindowToTop(IntPtr hWnd);
+
     /// <summary>Окно под курсором. Нужно, чтобы отличить клик по своему меню
     /// от клика в чужое приложение: окно виджета висит с WS_EX_NOACTIVATE и
     /// захват мыши не удерживает, поэтому WPF о таком клике не узнаёт.</summary>

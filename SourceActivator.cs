@@ -48,6 +48,97 @@ internal static class SourceActivator
         return true;
     }
 
+    /// <summary>Процессы браузеров. По одному классу окна их не отличить:
+    /// Chrome_WidgetWin_1 у всех приложений на Electron тоже (Claude, Discord).</summary>
+    private static readonly string[] BrowserProcesses =
+        { "browser", "chrome", "msedge", "opera", "brave", "vivaldi" };
+
+    /// <summary>
+    /// Поднять окно браузера со звучащей вкладкой. Вкладку расширение уже
+    /// сделало активной, её заголовок стал заголовком окна - по нему и ищем
+    /// нужное среди нескольких окон. Не нашлось по заголовку - берём верхнее
+    /// окно браузера: EnumWindows идёт сверху вниз по Z-порядку.
+    /// </summary>
+    public static bool BringBrowserToFront(string tabTitle)
+    {
+        IntPtr byTitle = IntPtr.Zero, topmost = IntPtr.Zero;
+        var names = new Dictionary<uint, string>();
+
+        Interop.EnumWindows((hwnd, _) =>
+        {
+            try
+            {
+                if (!Interop.IsWindowVisible(hwnd)) return true;
+                if (Interop.GetWindow(hwnd, Interop.GW_OWNER) != IntPtr.Zero) return true;
+                int len = Interop.GetWindowTextLength(hwnd);
+                if (len <= 0) return true;
+
+                Interop.GetWindowThreadProcessId(hwnd, out uint pid);
+                if (!names.TryGetValue(pid, out string? name))
+                {
+                    try { using var p = Process.GetProcessById((int)pid); name = p.ProcessName; }
+                    catch { name = ""; }
+                    names[pid] = name;
+                }
+                if (!BrowserProcesses.Contains(name, StringComparer.OrdinalIgnoreCase)) return true;
+
+                if (topmost == IntPtr.Zero) topmost = hwnd;
+                if (tabTitle.Length > 0)
+                {
+                    var sb = new System.Text.StringBuilder(len + 1);
+                    Interop.GetWindowText(hwnd, sb, sb.Capacity);
+                    if (sb.ToString().StartsWith(tabTitle, StringComparison.Ordinal))
+                    {
+                        byTitle = hwnd;
+                        return false; // нашли - дальше не перебираем
+                    }
+                }
+            }
+            catch { }
+            return true;
+        }, IntPtr.Zero);
+
+        IntPtr target = byTitle != IntPtr.Zero ? byTitle : topmost;
+        return target != IntPtr.Zero && BringToFront(target);
+    }
+
+    /// <summary>
+    /// Вывести окно на передний план без мигания на панели задач - приём из
+    /// Джарвиса (skills/windows). Сначала честный SetForegroundWindow; если
+    /// Windows отказала (запрет смены активного окна - от него и мигание),
+    /// свой поток ввода на время вызова привязывается к потоку окна, которое
+    /// сейчас впереди, и запрет перестаёт действовать. Прав администратора не
+    /// требует. В отличие от "нажатия" Alt ничего не шлёт в окна: одиночный
+    /// Alt у браузера фокусирует кнопку меню.
+    /// </summary>
+    public static bool BringToFront(IntPtr hwnd)
+    {
+        // Разворачиваем только свёрнутое: SW_RESTORE у окна во весь экран
+        // вернул бы его к обычному размеру
+        if (Interop.IsIconic(hwnd))
+            Interop.ShowWindow(hwnd, Interop.SW_RESTORE);
+
+        if (Interop.GetForegroundWindow() == hwnd) return true;
+        if (Interop.SetForegroundWindow(hwnd)) return true;
+
+        IntPtr fg = Interop.GetForegroundWindow();
+        uint theirs = Interop.GetWindowThreadProcessId(fg, out _);
+        uint ours = Interop.GetCurrentThreadId();
+        if (theirs == 0 || theirs == ours)
+            return Interop.SetForegroundWindow(hwnd);
+
+        Interop.AttachThreadInput(ours, theirs, true);
+        try
+        {
+            Interop.BringWindowToTop(hwnd);
+            return Interop.SetForegroundWindow(hwnd);
+        }
+        finally
+        {
+            Interop.AttachThreadInput(ours, theirs, false);
+        }
+    }
+
     /// <summary>Главное окно процесса, имя которого встречается в AUMID.
     /// Process.MainWindowHandle тут не годится: у свёрнутых в трей приложений
     /// (Telegram, AyuGram) он равен нулю.</summary>
