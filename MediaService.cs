@@ -11,6 +11,9 @@ public sealed record TrackInfo(string Title, string Artist, bool IsPlaying, bool
 /// Spotify desktop publishes the playing track there - no login and no
 /// Spotify API needed. Prefers the Spotify session; without one, follows
 /// the active media session.
+///
+/// Every call into WinRT goes through <see cref="WinRtThread"/> and nowhere
+/// else - see the comment there for what happened when they did not.
 /// </summary>
 public sealed class MediaService
 {
@@ -33,8 +36,10 @@ public sealed class MediaService
         {
             try
             {
-                _manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
-                break;
+                _manager = await WinRtThread.Run(() => WinRtThread.Await(
+                    GlobalSystemMediaTransportControlsSessionManager.RequestAsync(), 10000));
+                if (_manager != null) break;
+                throw new TimeoutException("RequestAsync did not complete in 10s.");
             }
             catch (Exception ex)
             {
@@ -48,35 +53,51 @@ public sealed class MediaService
                 await Task.Delay(TimeSpan.FromSeconds(4 << attempt));
             }
         }
-        _manager.SessionsChanged += (_, _) => PickSession();
-        // Без этого смена "текущей" сессии проходила мимо: список сессий
-        // не менялся (вкладка/плеер уже были открыты), SessionsChanged молчал,
-        // и виджет оставался привязан к прежней сессии
-        _manager.CurrentSessionChanged += (_, _) => PickSession();
-        PickSession();
-    }
 
-    private readonly object _pickLock = new();
+        await WinRtThread.Run(() =>
+        {
+            // The callbacks arrive on RPC threads, so they only queue the work -
+            // reading sessions from there is what used to scatter WinRT objects
+            // across transient apartments
+            _manager!.SessionsChanged += (_, _) => WinRtThread.Post(PickSession);
+            // Без этого смена "текущей" сессии проходила мимо: список сессий
+            // не менялся (вкладка/плеер уже были открыты), SessionsChanged молчал,
+            // и виджет оставался привязан к прежней сессии
+            _manager.CurrentSessionChanged += (_, _) => WinRtThread.Post(PickSession);
+            PickSession();
+        });
+    }
 
     /// <summary>Unsubscribes everything - without this a closed window stayed
     /// pinned in memory by the WinRT events and kept processing sessions.</summary>
     public void Shutdown()
     {
-        lock (_pickLock)
+        // Short wait: this runs while the app is closing, and a session that
+        // hangs must not hold the exit back
+        try { WinRtThread.Run(() => Unsubscribe(Swap(null))).Wait(1500); } catch { }
+    }
+
+    /// <summary>Puts a new session in place and hands back the old one. Only
+    /// ever called on the WinRT thread, and that is what serializes the swaps:
+    /// two bursts of session events used to interleave and either duplicate
+    /// subscriptions or leave handlers pinned to a dead session.</summary>
+    private GlobalSystemMediaTransportControlsSession? Swap(GlobalSystemMediaTransportControlsSession? next)
+    {
+        var old = _session;
+        _session = next;
+        return old;
+    }
+
+    private void Unsubscribe(GlobalSystemMediaTransportControlsSession? session)
+    {
+        if (session == null) return;
+        try
         {
-            var old = _session;
-            _session = null;
-            if (old != null)
-            {
-                try
-                {
-                    old.MediaPropertiesChanged -= OnMediaPropertiesChanged;
-                    old.PlaybackInfoChanged -= OnPlaybackInfoChanged;
-                    old.TimelinePropertiesChanged -= OnTimelineChanged;
-                }
-                catch { }
-            }
+            session.MediaPropertiesChanged -= OnMediaPropertiesChanged;
+            session.PlaybackInfoChanged -= OnPlaybackInfoChanged;
+            session.TimelinePropertiesChanged -= OnTimelineChanged;
         }
+        catch { }
     }
 
     private void PickSession()
@@ -120,38 +141,30 @@ public sealed class MediaService
             Diag.Once("get-sessions", "Reading media sessions failed: " + ex.Message);
         }
 
-        // SessionsChanged arrives on WinRT threads in bursts (player starting/
-        // closing): without the lock, two interleaved swaps duplicated
-        // subscriptions or left handlers pinned to a dead session
-        lock (_pickLock)
+        if (ReferenceEquals(_session, chosen))
         {
-            var old = _session;
-            if (ReferenceEquals(old, chosen))
-            {
-                if (chosen == null) Changed?.Invoke();
-                return;
-            }
-            if (old != null)
-            {
-                try
-                {
-                    old.MediaPropertiesChanged -= OnMediaPropertiesChanged;
-                    old.PlaybackInfoChanged -= OnPlaybackInfoChanged;
-                    old.TimelinePropertiesChanged -= OnTimelineChanged;
-                }
-                catch { }
-            }
+            if (chosen == null) Changed?.Invoke();
+            return;
+        }
 
-            _session = chosen;
-            if (chosen != null)
-            {
-                chosen.MediaPropertiesChanged += OnMediaPropertiesChanged;
-                chosen.PlaybackInfoChanged += OnPlaybackInfoChanged;
-                chosen.TimelinePropertiesChanged += OnTimelineChanged;
-            }
+        Unsubscribe(Swap(chosen));
+        // Читаем один раз, здесь: AUMID нужен потоку интерфейса (клик по
+        // названию ищет окно источника), а ему до WinRT дотрагиваться нельзя
+        _sourceAppId = ReadSourceAppId(chosen);
+        if (chosen != null)
+        {
+            chosen.MediaPropertiesChanged += OnMediaPropertiesChanged;
+            chosen.PlaybackInfoChanged += OnPlaybackInfoChanged;
+            chosen.TimelinePropertiesChanged += OnTimelineChanged;
         }
 
         Changed?.Invoke();
+    }
+
+    private static string? ReadSourceAppId(GlobalSystemMediaTransportControlsSession? session)
+    {
+        try { return session?.SourceAppUserModelId; }
+        catch { return null; }
     }
 
     private void OnMediaPropertiesChanged(GlobalSystemMediaTransportControlsSession sender, MediaPropertiesChangedEventArgs args) =>
@@ -163,22 +176,29 @@ public sealed class MediaService
     private void OnTimelineChanged(GlobalSystemMediaTransportControlsSession sender, TimelinePropertiesChangedEventArgs args) =>
         TimelineChanged?.Invoke();
 
-    /// <summary>Идентификатор приложения текущей сессии (AUMID). По нему
-    /// находится окно источника, чтобы показать его по клику.</summary>
-    public string? SourceAppId
-    {
-        get
-        {
-            try { return _session?.SourceAppUserModelId; }
-            catch { return null; }
-        }
-    }
+    private volatile string? _sourceAppId;
 
-    /// <summary>Quick timeline read (no track properties and no cover art).</summary>
+    /// <summary>Идентификатор приложения текущей сессии (AUMID). По нему
+    /// находится окно источника, чтобы показать его по клику. Значение снято
+    /// при выборе сессии: меняться ему незачем, а читать по требованию
+    /// значило бы звать WinRT из потока интерфейса.</summary>
+    public string? SourceAppId => _sourceAppId;
+
+    /// <summary>Quick timeline read (no track properties and no cover art).
+    /// Synchronous by contract - the window calls it from its own Task.Run -
+    /// but the WinRT part still happens on the WinRT thread.</summary>
     public (TimeSpan Position, TimeSpan Duration, bool IsPlaying, DateTime PositionAtUtc)? GetTimeline()
     {
         var s = _session;
         if (s == null) return null;
+        var job = WinRtThread.Run(() => ReadTimeline(s));
+        try { return job.Wait(3000) ? job.Result : null; }
+        catch { return null; }
+    }
+
+    private static (TimeSpan Position, TimeSpan Duration, bool IsPlaying, DateTime PositionAtUtc)?
+        ReadTimeline(GlobalSystemMediaTransportControlsSession s)
+    {
         try
         {
             var tl = s.GetTimelineProperties();
@@ -198,107 +218,95 @@ public sealed class MediaService
     {
         var s = _session;
         if (s == null) return null;
-        try
+        return await WinRtThread.Run(() =>
         {
-            var props = await s.TryGetMediaPropertiesAsync();
-            var pi = s.GetPlaybackInfo();
-            bool playing = pi?.PlaybackStatus ==
-                           GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+            try
+            {
+                var props = WinRtThread.Await(s.TryGetMediaPropertiesAsync());
+                var pi = s.GetPlaybackInfo();
+                bool playing = pi?.PlaybackStatus ==
+                               GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
 
-            var tl = s.GetTimelineProperties();
-            TimeSpan position = tl?.Position ?? TimeSpan.Zero;
-            TimeSpan duration = tl != null ? tl.EndTime - tl.StartTime : TimeSpan.Zero;
-            DateTime positionAt = tl?.LastUpdatedTime.UtcDateTime ?? DateTime.UtcNow;
+                var tl = s.GetTimelineProperties();
+                TimeSpan position = tl?.Position ?? TimeSpan.Zero;
+                TimeSpan duration = tl != null ? tl.EndTime - tl.StartTime : TimeSpan.Zero;
+                DateTime positionAt = tl?.LastUpdatedTime.UtcDateTime ?? DateTime.UtcNow;
 
-            return new TrackInfo(props?.Title ?? "", props?.Artist ?? "", playing, pi?.IsShuffleActive,
-                position, duration, positionAt);
-        }
-        catch (Exception ex)
-        {
-            Diag.Once("get-track", "Reading track from the Spotify session failed: " + ex.Message);
-            return null;
-        }
+                return new TrackInfo(props?.Title ?? "", props?.Artist ?? "", playing, pi?.IsShuffleActive,
+                    position, duration, positionAt);
+            }
+            catch (Exception ex)
+            {
+                Diag.Once("get-track", "Reading track from the Spotify session failed: " + ex.Message);
+                return null;
+            }
+        });
     }
 
     public async Task<byte[]?> GetThumbnailAsync()
     {
         var s = _session;
         if (s == null) return null;
-        try
+        return await WinRtThread.Run(() =>
         {
-            var props = await s.TryGetMediaPropertiesAsync();
-            if (props?.Thumbnail == null) return null;
-
-            using var stream = await props.Thumbnail.OpenReadAsync();
-            if (stream.Size == 0) return null;
-
-            var bytes = new byte[stream.Size];
-            using var reader = new DataReader(stream.GetInputStreamAt(0));
-            await reader.LoadAsync((uint)stream.Size);
-            reader.ReadBytes(bytes);
-            return bytes;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    public async Task TogglePlayPauseAsync()
-    {
-        var s = _session;
-        if (s == null) return;
-        try { await s.TryTogglePlayPauseAsync(); } catch { }
-    }
-
-    public async Task NextAsync()
-    {
-        var s = _session;
-        if (s == null) return;
-        try { await s.TrySkipNextAsync(); } catch { }
-    }
-
-    public async Task PreviousAsync()
-    {
-        var s = _session;
-        if (s == null) return;
-        try { await s.TrySkipPreviousAsync(); } catch { }
-    }
-
-    public async Task SeekAsync(TimeSpan position)
-    {
-        var s = _session;
-        if (s == null) return;
-        try { await s.TryChangePlaybackPositionAsync(position.Ticks); } catch { }
-    }
-
-    public async Task CycleRepeatAsync()
-    {
-        var s = _session;
-        if (s == null) return;
-        try
-        {
-            var current = s.GetPlaybackInfo()?.AutoRepeatMode ?? Windows.Media.MediaPlaybackAutoRepeatMode.None;
-            var next = current switch
+            try
             {
-                Windows.Media.MediaPlaybackAutoRepeatMode.None => Windows.Media.MediaPlaybackAutoRepeatMode.List,
-                Windows.Media.MediaPlaybackAutoRepeatMode.List => Windows.Media.MediaPlaybackAutoRepeatMode.Track,
-                _ => Windows.Media.MediaPlaybackAutoRepeatMode.None,
-            };
-            await s.TryChangeAutoRepeatModeAsync(next);
-        }
-        catch { }
+                var props = WinRtThread.Await(s.TryGetMediaPropertiesAsync());
+                if (props?.Thumbnail == null) return null;
+
+                using var stream = WinRtThread.Await(props.Thumbnail.OpenReadAsync(), 5000);
+                if (stream == null || stream.Size == 0) return null;
+
+                var bytes = new byte[stream.Size];
+                using var reader = new DataReader(stream.GetInputStreamAt(0));
+                WinRtThread.AwaitAny(reader.LoadAsync((uint)stream.Size).AsTask(), 5000);
+                reader.ReadBytes(bytes);
+                return bytes;
+            }
+            catch
+            {
+                return null;
+            }
+        });
     }
 
-    public async Task ToggleShuffleAsync()
+    /// <summary>A command for the current session, on the WinRT thread.
+    /// Failures are swallowed by design: a player that has just closed is the
+    /// normal case here, not an error worth reporting.</summary>
+    private Task Command(Action<GlobalSystemMediaTransportControlsSession> action)
     {
         var s = _session;
-        if (s == null) return;
-        try
-        {
-            bool current = s.GetPlaybackInfo()?.IsShuffleActive ?? false;
-            await s.TryChangeShuffleActiveAsync(!current);
-        }
-        catch { }
+        if (s == null) return Task.CompletedTask;
+        return WinRtThread.Run(() => { try { action(s); } catch { } });
     }
+
+    public Task TogglePlayPauseAsync() =>
+        Command(s => WinRtThread.AwaitAny(s.TryTogglePlayPauseAsync().AsTask()));
+
+    public Task NextAsync() =>
+        Command(s => WinRtThread.AwaitAny(s.TrySkipNextAsync().AsTask()));
+
+    public Task PreviousAsync() =>
+        Command(s => WinRtThread.AwaitAny(s.TrySkipPreviousAsync().AsTask()));
+
+    public Task SeekAsync(TimeSpan position) =>
+        Command(s => WinRtThread.AwaitAny(s.TryChangePlaybackPositionAsync(position.Ticks).AsTask()));
+
+    public Task CycleRepeatAsync() => Command(s =>
+    {
+        var current = s.GetPlaybackInfo()?.AutoRepeatMode ?? Windows.Media.MediaPlaybackAutoRepeatMode.None;
+        var next = current switch
+        {
+            Windows.Media.MediaPlaybackAutoRepeatMode.None => Windows.Media.MediaPlaybackAutoRepeatMode.List,
+            Windows.Media.MediaPlaybackAutoRepeatMode.List => Windows.Media.MediaPlaybackAutoRepeatMode.Track,
+            _ => Windows.Media.MediaPlaybackAutoRepeatMode.None,
+        };
+        WinRtThread.AwaitAny(s.TryChangeAutoRepeatModeAsync(next).AsTask());
+    });
+
+    public Task ToggleShuffleAsync() => Command(s =>
+    {
+        bool current = s.GetPlaybackInfo()?.IsShuffleActive ?? false;
+        WinRtThread.AwaitAny(s.TryChangeShuffleActiveAsync(!current).AsTask());
+    });
 }

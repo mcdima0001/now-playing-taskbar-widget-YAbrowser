@@ -1,6 +1,7 @@
 bin/
 obj/
 publish/
+out/
 installer/
 Packaging/staging/
 Packaging/out/
