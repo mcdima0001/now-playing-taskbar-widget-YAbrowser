@@ -42,20 +42,20 @@ async function refreshAudible() {
   }
 }
 
-// Забыть вкладки, которые давно не звучат. Возвращает true, если кого-то убрали
-function dropQuiet() {
-  const now = Date.now();
-  let dropped = false;
-  for (const [k, v] of [...tabs]) {
-    if (keepsPaused(v)) continue;
-    // Только что найденной вкладке даём ту же минуту: звучит она или нет,
-    // мы ещё не знаем - опрос мог не успеть пройти
-    if (now - v.firstSeen < QUIET_MS) continue;
-    if (now - v.lastAudibleAt <= QUIET_MS) continue;
-    tabs.delete(k);
-    dropped = true;
-  }
-  return dropped;
+// Запись "молчит": звука из её вкладки не было дольше QUIET_MS.
+//
+// Такие не удаляются из списка, а лишь выбывают из выбора. Удаление тут не
+// работает в принципе: страница жива и следующим же отчётом (раз в пару
+// секунд) записывается заново - с новым firstSeen, то есть с новой минутой
+// форы. Именно поэтому правило не срабатывало ни разу: YouTube на паузе
+// возвращался в список быстрее, чем успевал из него выпасть.
+//
+// Отсчёт от последнего звука, а если его не было ни разу - от появления
+// записи: свежей вкладке нужна фора, опрос мог не успеть пройти.
+function quiet(v, now) {
+  if (keepsPaused(v)) return false;
+  if (v.audible) return false;
+  return now - (v.lastAudibleAt || v.firstSeen) > QUIET_MS;
 }
 let ws = null;
 let retry = 1000;
@@ -66,19 +66,33 @@ function idOf(sender) {
   return `${sender.tab ? sender.tab.id : 0}:${sender.frameId || 0}`;
 }
 
-// Текущая: сначала та, что реально звучит, потом играющая по своим данным,
-// при равенстве - с самым свежим отчётом
+// Кто из двух записей главнее. Порядок: звучащая вкладка, затем играющая по
+// своим данным, затем - внутри ОДНОЙ вкладки - главный документ важнее врезки,
+// и лишь в последнюю очередь свежесть отчёта
+function better(v, best) {
+  if (!best) return true;
+  if (!!v.audible !== !!best.audible) return !!v.audible;
+  const vp = !!v.state.playing, bp = !!best.state.playing;
+  if (vp !== bp) return vp;
+  // content.js работает во всех фреймах, и на странице с рекламой или
+  // встроенным плеером их несколько. Записи у них отдельные (tabId:frameId),
+  // и они спорили за виджет наравне с основным документом - отсюда и
+  // перескакивание названий при смене ролика в одной и той же вкладке.
+  // Признак audible тут не помогает: он у вкладки целиком, общий для всех её
+  // фреймов
+  if (v.tabId === best.tabId && (v.frameId === 0) !== (best.frameId === 0)) {
+    return v.frameId === 0;
+  }
+  return v.ts > best.ts;
+}
+
 function current() {
   const now = Date.now();
   let best = null;
   for (const [k, v] of tabs) {
     if (now - v.ts > STALE_MS) { tabs.delete(k); continue; }
-    if (!best) { best = v; continue; }
-    // Звук важнее всего: пользователь слышит именно эту вкладку
-    if (!!v.audible !== !!best.audible) { if (v.audible) best = v; continue; }
-    const bp = best.state.playing, vp = v.state.playing;
-    if (vp !== bp) { if (vp) best = v; continue; }
-    if (v.ts > best.ts) best = v;
+    if (quiet(v, now)) continue;
+    if (better(v, best)) best = v;
   }
   return best;
 }
@@ -94,14 +108,17 @@ function push(force) {
     return;
   }
   const s = cur.state;
+  // Вкладка, фрейм и число известных записей - только для отладочного лога
+  // виджета: по ним видно, кто именно спорит за отображение
+  const meta = { tab: cur.tabId, frame: cur.frameId, n: tabs.size };
   const key = [s.playing, s.title, s.artist, s.art, Math.round(s.duration)].join('|');
   if (!force && key === lastSentKey) {
     // позиция всё равно нужна регулярно - виджет правит дрейф по ней
-    ws.send(JSON.stringify({ type: 'state', ...s, ts: Date.now() }));
+    ws.send(JSON.stringify({ type: 'state', ...s, ...meta, ts: Date.now() }));
     return;
   }
   lastSentKey = key;
-  ws.send(JSON.stringify({ type: 'state', ...s, ts: Date.now() }));
+  ws.send(JSON.stringify({ type: 'state', ...s, ...meta, ts: Date.now() }));
 }
 
 // Спрашиваем каждую известную вкладку напрямую: доставку сообщений throttling
@@ -112,8 +129,9 @@ async function pull() {
   // Сначала разбираемся, кто звучит, и выкидываем замолчавших - опрашивать и
   // учитывать их дальше незачем
   await refreshAudible();
-  if (dropQuiet()) push(true);
-  if (!tabs.size) return;
+  // Пересчитать показ: за прошедшие секунды кто-то мог замолчать насовсем, и
+  // виджету пора об этом узнать
+  push(false);
   const now = Date.now();
   for (const [k, v] of [...tabs]) {
     try {
