@@ -1,5 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <!-- Права: строго от имени запустившего. Без ЯВНОГО объявления Windows
+       применяет к программе эвристику "определения установщика" и решает
+       сама - и решила, что виджету нужен администратор. Последствия были
+       молчаливыми и сбивали с толку неделями: записи автозагрузки, которым
+       нужен UAC, проводник пропускает вообще без сообщений (виджет не
+       поднимался ни из реестра, ни из папки "Автозагрузка"), а задача
+       планировщика падала с 0x800702E4 (ERROR_ELEVATION_REQUIRED).
+       Администратор виджету не нужен: установщик и тот ставится
+       с PrivilegesRequired=lowest -->
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
