@@ -12,11 +12,25 @@ public sealed class MediaHub
 {
     private readonly MediaService _smtc = new();
     private readonly BrowserBridge _browser = new();
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(5) };
+
+    // Пять секунд не хватало: обложка Яндекса тянется около двух даже напрямую,
+    // а через прокси заметно дольше
+    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(10) };
+
+    /// <summary>Запасной клиент, нарочно мимо прокси. HttpClient читает
+    /// настройки системного прокси ОДИН раз, при создании, а виджет живёт
+    /// неделями: стоило включить VPN, запустить виджет и потом VPN выключить -
+    /// и он до перезапуска стучался в уже мёртвый порт ("конечный компьютер
+    /// отверг запрос на подключение, 127.0.0.1:2080"), а обложки просто не
+    /// было. Повтор делается только когда не удалось само подключение: если
+    /// прокси не отвечает, туннеля нет и обходить нечего.</summary>
+    private readonly HttpClient _httpDirect =
+        new(new SocketsHttpHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(10) };
 
     private volatile bool _useBrowser;
     private string _artUrl = "";
     private byte[]? _artBytes;
+    private DateTime _artRetryAt;
 
     public event Action? Changed;
     public event Action? TimelineChanged;
@@ -114,14 +128,18 @@ public sealed class MediaHub
 
         string url = _browser.Current?.Art ?? "";
         if (url.Length == 0) return null;
-        if (url == _artUrl) return _artBytes;
+        // Неудача больше не запоминается навсегда. Раньше сорвавшаяся загрузка
+        // клала в кеш пустое значение, тот же адрес повторно не запрашивался,
+        // и трек до самого конца оставался без обложки
+        if (url == _artUrl && (_artBytes != null || DateTime.UtcNow < _artRetryAt))
+            return _artBytes;
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
             return null;
 
         try
         {
-            var bytes = await _http.GetByteArrayAsync(uri);
+            var bytes = await DownloadArtAsync(uri);
             // Обложки - это десятки килобайт; всё крупнее качать незачем
             if (bytes.Length > 8 * 1024 * 1024) return null;
             _artUrl = url;
@@ -133,7 +151,22 @@ public sealed class MediaHub
             Diag.Once("art-download", "Downloading cover art from the browser failed: " + ex.Message);
             _artUrl = url;
             _artBytes = null;
+            _artRetryAt = DateTime.UtcNow + TimeSpan.FromSeconds(15);
             return null;
+        }
+    }
+
+    /// <summary>Качает обложку, при отказе в подключении повторяя мимо прокси -
+    /// см. <see cref="_httpDirect"/>.</summary>
+    private async Task<byte[]> DownloadArtAsync(Uri uri)
+    {
+        try
+        {
+            return await _http.GetByteArrayAsync(uri);
+        }
+        catch (HttpRequestException ex) when (ex.InnerException is System.Net.Sockets.SocketException)
+        {
+            return await _httpDirect.GetByteArrayAsync(uri);
         }
     }
 
