@@ -100,9 +100,59 @@ public sealed class MediaService
         catch { }
     }
 
+    /// <summary>
+    /// Библиотеки, которые реализуют медиасессию. Их нужно держать в памяти.
+    ///
+    /// У объекта WinRT таблица методов - это КОПИЯ указателей в код той самой
+    /// библиотеки. Библиотеку COM вправе выгрузить, как только на её объекты
+    /// не осталось ссылок, а ссылка на стороне .NET живёт до сборки мусора и
+    /// освобождается потом, в финализаторе, - уже по адресам выгруженного
+    /// образа. Отсюда и падение процесса по AccessViolation в
+    /// WinRT.IObjectReference.Finalize() (известный дефект CsWinRT, issue 337).
+    /// Момент выгрузки зависит от того, остались ли в системе плееры, поэтому
+    /// падало в разное время суток и не повторялось на стенде.
+    ///
+    /// Первая библиотека - сама реализация Windows.Media.Control, вторая -
+    /// заглушка маршалинга: сессия чужого процесса приходит через неё, и
+    /// таблицы методов у таких объектов лежат именно в ней.
+    /// </summary>
+    private static readonly string[] MediaModules =
+        { "Windows.Media.MediaControl.dll", "OneCoreUAPCommonProxyStub.dll" };
+
+    private static readonly HashSet<string> PinnedModules = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Прибивает эти библиотеки в памяти. Зовётся при каждом выборе
+    /// сессии, а не один раз: заглушка маршалинга подгружается только вместе
+    /// с первой сессией чужого процесса, которой при запуске может и не быть.</summary>
+    private static void PinMediaModules()
+    {
+        foreach (var name in MediaModules)
+        {
+            if (PinnedModules.Contains(name)) continue;
+            try
+            {
+                // Библиотека ещё не загружена - не беда, попробуем в следующий
+                // раз: нарочно грузить её ради закрепления незачем
+                if (Interop.GetModuleHandleEx(Interop.GET_MODULE_HANDLE_EX_FLAG_PIN, name, out _))
+                {
+                    PinnedModules.Add(name);
+                    // Одна строка на запуск: по ней видно, что защита от
+                    // выгрузки встала, и к какому моменту
+                    Diag.Log($"Pinned {name} in memory (so its vtables stay valid for the finalizer).");
+                }
+            }
+            catch (Exception ex)
+            {
+                PinnedModules.Add(name); // второй раз не пробуем
+                Diag.Once("pin-module", $"Pinning {name} in memory failed: {ex.Message}");
+            }
+        }
+    }
+
     private void PickSession()
     {
         if (_manager == null) return;
+        PinMediaModules();
 
         // Any player that publishes to SMTC. Spotify wins (it is the only one
         // with extras through UI Automation); without it, follow the session

@@ -176,6 +176,13 @@ internal static class Interop
     [DllImport("kernel32.dll")]
     public static extern uint GetCurrentThreadId();
 
+    /// <summary>Оставить библиотеку в памяти до конца работы процесса, сколько
+    /// бы раз её ни освобождали.</summary>
+    public const uint GET_MODULE_HANDLE_EX_FLAG_PIN = 0x00000001;
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool GetModuleHandleEx(uint dwFlags, string lpModuleName, out IntPtr phModule);
+
     [DllImport("user32.dll")]
     public static extern bool BringWindowToTop(IntPtr hWnd);
 
