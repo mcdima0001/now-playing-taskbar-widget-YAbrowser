@@ -149,6 +149,29 @@ public sealed class MediaService
         }
     }
 
+    private static GlobalSystemMediaTransportControlsSessionPlaybackStatus? Status(
+        GlobalSystemMediaTransportControlsSession session)
+    {
+        try { return session.GetPlaybackInfo()?.PlaybackStatus; }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Сессии, которой есть что показать.
+    ///
+    /// Доиграв, приложение оставляет сессию в состоянии Stopped, и она никуда
+    /// не девается. Виджет брал "текущую по версии Windows" не глядя на
+    /// состояние, и прослушанное голосовое сообщение в Telegram (AyuGram)
+    /// висело на панели часами: "Гс в 19:21", status = Stopped, длительность
+    /// ноль. Closed - то же самое, сессия уже закрыта.
+    ///
+    /// Промежуточные Opened и Changing нарочно считаются годными: Changing
+    /// проскакивает при каждой смене трека, и виджет мигал бы пустотой.
+    /// </summary>
+    private static bool HasSomethingToShow(GlobalSystemMediaTransportControlsSession session) =>
+        Status(session) is not (GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped
+            or GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed);
+
     private void PickSession()
     {
         if (_manager == null) return;
@@ -160,7 +183,8 @@ public sealed class MediaService
         GlobalSystemMediaTransportControlsSession? chosen = null;
         try
         {
-            var sessions = _manager.GetSessions();
+            // Доигравшие сессии сюда не доходят - см. HasSomethingToShow
+            var sessions = _manager.GetSessions().Where(HasSomethingToShow).ToList();
             chosen = sessions.FirstOrDefault(s =>
                 (s.SourceAppUserModelId ?? "").Contains("spotify", StringComparison.OrdinalIgnoreCase));
             if (chosen == null)
@@ -169,19 +193,19 @@ public sealed class MediaService
                 // текущей вполне может остаться давно поставленный на паузу плеер,
                 // и тогда виджет показывал его вместо того, что звучит
                 chosen = sessions.FirstOrDefault(s =>
-                {
-                    try
-                    {
-                        return s.GetPlaybackInfo()?.PlaybackStatus ==
-                               GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
-                    }
-                    catch { return false; }
-                });
+                    Status(s) == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing);
                 if (chosen == null)
                 {
                     // Ничего не играет - берём выбор самой Windows (та же сессия,
-                    // что за плашкой громкости), список как последний резерв
-                    try { chosen = _manager.GetCurrentSession(); } catch { }
+                    // что за плашкой громкости), список как последний резерв.
+                    // "Текущей" Windows держит и давно доигравшую, так что её
+                    // тоже надо проверять
+                    try
+                    {
+                        var current = _manager.GetCurrentSession();
+                        if (current != null && HasSomethingToShow(current)) chosen = current;
+                    }
+                    catch { }
                     chosen ??= sessions.FirstOrDefault();
                 }
             }
@@ -220,8 +244,14 @@ public sealed class MediaService
     private void OnMediaPropertiesChanged(GlobalSystemMediaTransportControlsSession sender, MediaPropertiesChangedEventArgs args) =>
         Changed?.Invoke();
 
-    private void OnPlaybackInfoChanged(GlobalSystemMediaTransportControlsSession sender, PlaybackInfoChangedEventArgs args) =>
+    private void OnPlaybackInfoChanged(GlobalSystemMediaTransportControlsSession sender, PlaybackInfoChangedEventArgs args)
+    {
+        // Выбранная сессия могла доиграть и стать Stopped - тогда она больше
+        // не годится, и выбирать надо заново. Сам по себе список сессий при
+        // этом не меняется, так что SessionsChanged не придёт
+        WinRtThread.Post(PickSession);
         Changed?.Invoke();
+    }
 
     private void OnTimelineChanged(GlobalSystemMediaTransportControlsSession sender, TimelinePropertiesChangedEventArgs args) =>
         TimelineChanged?.Invoke();
@@ -253,6 +283,11 @@ public sealed class MediaService
         {
             var tl = s.GetTimelineProperties();
             var pi = s.GetPlaybackInfo();
+            // Доигравшую сессию не показываем - подстраховка на случай, если
+            // событие о смене состояния не пришло и выбор не пересчитался
+            if (pi?.PlaybackStatus is GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped
+                or GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed)
+                return null;
             return (tl?.Position ?? TimeSpan.Zero,
                     tl != null ? tl.EndTime - tl.StartTime : TimeSpan.Zero,
                     pi?.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing,
@@ -272,8 +307,15 @@ public sealed class MediaService
         {
             try
             {
-                var props = WinRtThread.Await(s.TryGetMediaPropertiesAsync());
                 var pi = s.GetPlaybackInfo();
+                // Та же подстраховка, что и в ReadTimeline: прослушанное
+                // голосовое сообщение оставляет сессию в Stopped, и показывать
+                // её не нужно
+                if (pi?.PlaybackStatus is GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped
+                    or GlobalSystemMediaTransportControlsSessionPlaybackStatus.Closed)
+                    return null;
+
+                var props = WinRtThread.Await(s.TryGetMediaPropertiesAsync());
                 bool playing = pi?.PlaybackStatus ==
                                GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
 
