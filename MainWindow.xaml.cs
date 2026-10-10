@@ -42,7 +42,8 @@ public partial class MainWindow : Window
     private Brush _progressFillNormal = Brushes.White;
     private bool? _lightTheme;
 
-    private readonly MediaHub _media = new();
+    // Общий на все окна - см. MediaHub.Shared
+    private readonly MediaHub _media = MediaHub.Shared;
     private readonly SpotifyUiaService _uia = new();
     private readonly WidgetSettings _settings = WidgetSettings.Shared;
     private bool? _liked;
@@ -3212,9 +3213,12 @@ public partial class MainWindow : Window
         StopSlide();
         _trackTimer.Stop();
         CancelRide(); // the ride tick must not continue on a dead hwnd
+        // Отписка и есть то, что отпускает окно: подписки WinRT держали его
+        // в памяти. Сам хаб не трогаем - он общий, и у соседнего окна (или у
+        // того, что пересоздаётся после перезапуска проводника) источник
+        // должен остаться живым
         if (_mediaChanged != null) _media.Changed -= _mediaChanged;
         if (_mediaTimeline != null) _media.TimelineChanged -= _mediaTimeline;
-        _media.Shutdown(); // releases the WinRT subscriptions that pinned the window
         WidgetSettings.Changed -= OnSettingsChanged;
         Instances.Remove(this);
         // Last window closed (e.g. an Explorer restart): reopen the door to the

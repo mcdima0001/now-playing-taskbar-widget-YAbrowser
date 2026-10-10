@@ -10,6 +10,23 @@ namespace SpotifyTaskbarWidget;
 /// </summary>
 public sealed class MediaHub
 {
+    /// <summary>
+    /// Один на весь процесс. Окон у виджета столько, сколько выбрано панелей
+    /// задач, а источник трека для них общий.
+    ///
+    /// Раньше хаб создавался на каждое окно — вместе с собственным мостом,
+    /// который слушает 127.0.0.1:45219. Второму окну порт уже не доставался:
+    ///
+    ///     Browser bridge could not listen on 127.0.0.1:45219:
+    ///     обычно разрешается только одно использование адреса сокета
+    ///
+    /// Выглядело это так, будто на втором мониторе виджет не работает: трек из
+    /// системной сессии он показывал, а музыку из браузера — нет, потому что
+    /// расширению было некуда достучаться. Заодно вдвое меньше обращений к
+    /// SMTC и одна загрузка обложки на всех.
+    /// </summary>
+    public static MediaHub Shared { get; } = new();
+
     private readonly MediaService _smtc = new();
     private readonly BrowserBridge _browser = new();
 
@@ -67,7 +84,14 @@ public sealed class MediaHub
     /// только из браузера: ни SMTC, ни mediaSession такого поля не имеют.</summary>
     public bool Explicit => _useBrowser && _browser.Current is { Explicit: true };
 
-    public async Task InitializeAsync()
+    private Task? _init;
+
+    /// <summary>Поднимается один раз, сколько бы окон ни попросило: все они
+    /// создаются на одном потоке интерфейса, так что гонки тут нет, а ждать
+    /// готовности каждое окно может своим await.</summary>
+    public Task InitializeAsync() => _init ??= InitializeOnceAsync();
+
+    private async Task InitializeOnceAsync()
     {
         _smtc.Changed += () => Changed?.Invoke();
         _smtc.TimelineChanged += () => TimelineChanged?.Invoke();

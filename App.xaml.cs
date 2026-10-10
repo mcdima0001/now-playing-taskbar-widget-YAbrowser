@@ -31,6 +31,11 @@ public partial class App : Application
         // the taskbar) and recreated - the app only exits when the user says so
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
+        // Источник трека общий на все окна, поэтому и закрывается он один раз,
+        // на выходе: окно, которое закрылось, может быть не последним - второй
+        // монитор или пересоздание после перезапуска проводника
+        Exit += (_, _) => MediaHub.Shared.Shutdown();
+
         DispatcherUnhandledException += (_, args) =>
         {
             // Shared writing with Diag: dedup of repeats (a timer stuck in an
