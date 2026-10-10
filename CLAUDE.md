@@ -128,7 +128,7 @@ dotnet publish SpotifyTaskbarWidget.csproj -c Release -o out
 `bridge-extension` и автозагрузка .NET 8, если его нет. Ставится в профиль
 пользователя (`PrivilegesRequired=lowest`), UAC не спрашивает.
 
-Выпуск: `git tag vX.Y.Z && git push fork vX.Y.Z`. Дальше `.github/workflows/release.yml`
+Выпуск: `git tag vX.Y.Z && git push origin vX.Y.Z`. Дальше `.github/workflows/release.yml`
 собирает на windows-раннере и сам прикладывает exe к релизу; пуш в `main`
 собирает то же самое в артефакты, чтобы поломка была видна сразу.
 
