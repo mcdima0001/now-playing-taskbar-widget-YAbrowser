@@ -340,6 +340,20 @@ internal static class Interop
         return DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, out int cloaked, sizeof(int)) != 0 || cloaked == 0;
     }
 
+    /// <summary>Окна оболочки, которые висят поверх всего и не считаются
+    /// содержимым экрана: их надо ПРОПУСКАТЬ при поиске верхнего окна, а не
+    /// останавливаться на них. Иначе достаточно одной панели задач на пути,
+    /// чтобы проверка решила "монитор свободен" и больше никуда не смотрела -
+    /// так и случалось после отключения второго монитора, когда его панель
+    /// ещё жива и по координатам попадает на оставшийся экран.</summary>
+    private static bool IsShellWindow(IntPtr hwnd)
+    {
+        var sb = new StringBuilder(256);
+        GetClassName(hwnd, sb, sb.Capacity);
+        return sb.ToString() is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd"
+            or "XamlExplorerHostIslandWindow";
+    }
+
     /// <summary>Это окно занимает монитор целиком и принадлежит приложению, а
     /// не оболочке.</summary>
     private static bool CoversMonitorAsApp(IntPtr hwnd, IntPtr monitor)
@@ -347,6 +361,8 @@ internal static class Interop
         var sb = new StringBuilder(256);
         GetClassName(hwnd, sb, sb.Capacity);
         string cls = sb.ToString();
+        // Рабочий стол сюда дойти может: если верхним оказался он, на мониторе
+        // просто ничего не открыто
         if (cls is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd"
             or "XamlExplorerHostIslandWindow")
             return false;
@@ -406,18 +422,34 @@ internal static class Interop
         if (monTray == IntPtr.Zero)
             return false;
 
+        var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        if (!GetMonitorInfo(monTray, ref mi))
+            return false;
+        long monArea = (long)(mi.rcMonitor.Right - mi.rcMonitor.Left)
+                     * (mi.rcMonitor.Bottom - mi.rcMonitor.Top);
+
         GetWindowThreadProcessId(self, out uint ours);
 
         IntPtr top = IntPtr.Zero;
-        // EnumWindows идёт сверху вниз по Z-порядку, так что первое подходящее
-        // окно на нашем мониторе и есть верхнее; дальше перебирать незачем
+        // EnumWindows идёт сверху вниз по Z-порядку, так что решает первое
+        // окно, которое вообще занимает монитор собой
         EnumWindows((hwnd, _) =>
         {
-            if (hwnd == tray) return true;
             GetWindowThreadProcessId(hwnd, out uint pid);
             if (pid == ours) return true; // свои окна виджета не в счёт
             if (!IsRealWindow(hwnd)) return true;
+            if (IsShellWindow(hwnd)) return true; // панели пропускаем, ищем дальше
             if (MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) != monTray) return true;
+            if (!GetWindowRect(hwnd, out RECT wr)) return true;
+
+            // Мелкие окна поверх всего - значки, подсказки, чужие утилиты -
+            // монитор собой не занимают, и смотреть надо, что под ними. Раньше
+            // поиск останавливался на первом попавшемся: с одним монитором
+            // сверху висело окошко 36x45, проверка решала "полноэкранного
+            // приложения нет", и виджет всплывал поверх развёрнутого ролика
+            long area = (long)(wr.Right - wr.Left) * (wr.Bottom - wr.Top);
+            if (area * 2 < monArea) return true;
+
             top = hwnd;
             return false;
         }, IntPtr.Zero);
