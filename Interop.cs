@@ -322,35 +322,40 @@ internal static class Interop
     public const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
     public const uint WINEVENT_OUTOFCONTEXT = 0x0000;
 
-    /// <summary>
-    /// True if the foreground window is fullscreen on the same monitor as the
-    /// taskbar (games, videos) - in that case the widget should hide.
-    /// </summary>
-    public static bool IsForegroundFullscreen(IntPtr self, IntPtr tray)
-    {
-        IntPtr fg = GetForegroundWindow();
-        if (fg == IntPtr.Zero || fg == self || fg == tray)
-            return false;
+    private const int DWMWA_CLOAKED = 14;
 
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(IntPtr hWnd, int attribute, out int value, int size);
+
+    /// <summary>Окно, которое действительно что-то показывает: видимое, не
+    /// свёрнутое, без владельца и не "скрытое" по версии DWM. Последнее важно:
+    /// у приложений из Store полно окон, которые IsWindowVisible считает
+    /// видимыми, хотя на экране их нет - без этой проверки верхним на мониторе
+    /// оказывалось именно такое.</summary>
+    private static bool IsRealWindow(IntPtr hwnd)
+    {
+        if (!IsWindowVisible(hwnd) || IsIconic(hwnd)) return false;
+        if (GetWindow(hwnd, GW_OWNER) != IntPtr.Zero) return false;
+        if (GetWindowRect(hwnd, out RECT r) && (r.Right <= r.Left || r.Bottom <= r.Top)) return false;
+        return DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, out int cloaked, sizeof(int)) != 0 || cloaked == 0;
+    }
+
+    /// <summary>Это окно занимает монитор целиком и принадлежит приложению, а
+    /// не оболочке.</summary>
+    private static bool CoversMonitorAsApp(IntPtr hwnd, IntPtr monitor)
+    {
         var sb = new StringBuilder(256);
-        GetClassName(fg, sb, sb.Capacity);
+        GetClassName(hwnd, sb, sb.Capacity);
         string cls = sb.ToString();
         if (cls is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd"
             or "XamlExplorerHostIslandWindow")
             return false;
 
-        IntPtr monFg = MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST);
-        IntPtr monTray = GetWindowRect(tray, out RECT tr)
-            ? GetTrayMonitor(tr)
-            : MonitorFromWindow(tray, MONITOR_DEFAULTTONEAREST);
-        if (monFg != monTray)
-            return false;
-
-        if (!GetWindowRect(fg, out RECT wr))
+        if (!GetWindowRect(hwnd, out RECT wr))
             return false;
 
         var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
-        if (!GetMonitorInfo(monFg, ref mi))
+        if (!GetMonitorInfo(monitor, ref mi))
             return false;
 
         bool coversMonitor = wr.Left <= mi.rcMonitor.Left && wr.Top <= mi.rcMonitor.Top
@@ -365,7 +370,7 @@ internal static class Interop
         // screen never reach this point (it used to run for any focused UWP app).
         if (cls is "Windows.UI.Core.CoreWindow" or "ApplicationFrameWindow")
         {
-            GetWindowThreadProcessId(fg, out uint pid);
+            GetWindowThreadProcessId(hwnd, out uint pid);
             try
             {
                 using var p = System.Diagnostics.Process.GetProcessById((int)pid);
@@ -381,6 +386,43 @@ internal static class Interop
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// True, если монитор этой панели задач целиком занят чужим окном -
+    /// роликом на весь экран, игрой. Тогда виджет прячется.
+    ///
+    /// Раньше смотрели только на АКТИВНОЕ окно, и этого не хватало: стоило с
+    /// развёрнутым роликом уйти на другой монитор, как активным становилось
+    /// окно там, проверка переставала срабатывать, и виджет всплывал поверх
+    /// видео (панель задач при этом оставалась спрятанной). Поэтому берётся
+    /// верхнее по Z-порядку окно НА СВОЁМ мониторе, кто бы ни был активен.
+    /// </summary>
+    public static bool IsMonitorCoveredByFullscreen(IntPtr self, IntPtr tray)
+    {
+        IntPtr monTray = GetWindowRect(tray, out RECT tr)
+            ? GetTrayMonitor(tr)
+            : MonitorFromWindow(tray, MONITOR_DEFAULTTONEAREST);
+        if (monTray == IntPtr.Zero)
+            return false;
+
+        GetWindowThreadProcessId(self, out uint ours);
+
+        IntPtr top = IntPtr.Zero;
+        // EnumWindows идёт сверху вниз по Z-порядку, так что первое подходящее
+        // окно на нашем мониторе и есть верхнее; дальше перебирать незачем
+        EnumWindows((hwnd, _) =>
+        {
+            if (hwnd == tray) return true;
+            GetWindowThreadProcessId(hwnd, out uint pid);
+            if (pid == ours) return true; // свои окна виджета не в счёт
+            if (!IsRealWindow(hwnd)) return true;
+            if (MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) != monTray) return true;
+            top = hwnd;
+            return false;
+        }, IntPtr.Zero);
+
+        return top != IntPtr.Zero && CoversMonitorAsApp(top, monTray);
     }
 
     // ---------- Глобальная горячая клавиша ----------

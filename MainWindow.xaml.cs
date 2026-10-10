@@ -874,7 +874,7 @@ public partial class MainWindow : Window
         // Hide when: the app is fullscreen (irrelevant under auto-hide - maximized
         // windows cover the whole screen and would give false positives; visibility
         // already follows the bar); or Spotify closed with no launcher button.
-        bool hide = (!Interop.IsAutoHideEnabled() && Interop.IsForegroundFullscreen(_hwnd, tray))
+        bool hide = (!Interop.IsAutoHideEnabled() && Interop.IsMonitorCoveredByFullscreen(_hwnd, tray))
                     || (!_spotifyPresent && !_settings.ShowLauncher);
         if (hide)
         {
