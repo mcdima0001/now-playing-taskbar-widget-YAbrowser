@@ -74,7 +74,7 @@ public sealed class MediaService
     {
         // Short wait: this runs while the app is closing, and a session that
         // hangs must not hold the exit back
-        try { WinRtThread.Run(() => Unsubscribe(Swap(null))).Wait(1500); } catch { }
+        try { WinRtThread.Run(() => { UnwatchAll(); Unsubscribe(Swap(null)); }).Wait(1500); } catch { }
     }
 
     /// <summary>Puts a new session in place and hands back the old one. Only
@@ -94,10 +94,46 @@ public sealed class MediaService
         try
         {
             session.MediaPropertiesChanged -= OnMediaPropertiesChanged;
-            session.PlaybackInfoChanged -= OnPlaybackInfoChanged;
             session.TimelinePropertiesChanged -= OnTimelineChanged;
         }
         catch { }
+    }
+
+    /// <summary>
+    /// Сессии, за состоянием которых следим. Следить нужно за ВСЕМИ, а не
+    /// только за показываемой.
+    ///
+    /// Остановленный плеер в выбор не попадает (см. HasSomethingToShow), и
+    /// подписки на него раньше не было вовсе. А когда в нём нажимают Play,
+    /// список сессий не меняется - значит SessionsChanged не придёт, и о
+    /// начале воспроизведения узнать неоткуда. Ровно так виджет прозевал
+    /// запуск AIMP и продолжал показывать вкладку браузера.
+    /// </summary>
+    private readonly List<GlobalSystemMediaTransportControlsSession> _watched = new();
+
+    private void Rewatch(IReadOnlyList<GlobalSystemMediaTransportControlsSession> sessions)
+    {
+        foreach (var old in _watched)
+        {
+            if (sessions.Contains(old)) continue;
+            try { old.PlaybackInfoChanged -= OnAnyPlaybackInfoChanged; } catch { }
+        }
+        foreach (var s in sessions)
+        {
+            if (_watched.Contains(s)) continue;
+            try { s.PlaybackInfoChanged += OnAnyPlaybackInfoChanged; } catch { }
+        }
+        _watched.Clear();
+        _watched.AddRange(sessions);
+    }
+
+    private void UnwatchAll()
+    {
+        foreach (var s in _watched)
+        {
+            try { s.PlaybackInfoChanged -= OnAnyPlaybackInfoChanged; } catch { }
+        }
+        _watched.Clear();
     }
 
     /// <summary>
@@ -183,8 +219,12 @@ public sealed class MediaService
         GlobalSystemMediaTransportControlsSession? chosen = null;
         try
         {
-            // Доигравшие сессии сюда не доходят - см. HasSomethingToShow
-            var sessions = _manager.GetSessions().Where(HasSomethingToShow).ToList();
+            var all = _manager.GetSessions();
+            // Следим за состоянием всех, включая доигравшие: иначе не узнаем,
+            // что в остановленном плеере нажали Play
+            Rewatch(all);
+            // А в выбор доигравшие не идут - см. HasSomethingToShow
+            var sessions = all.Where(HasSomethingToShow).ToList();
             chosen = sessions.FirstOrDefault(s =>
                 (s.SourceAppUserModelId ?? "").Contains("spotify", StringComparison.OrdinalIgnoreCase));
             if (chosen == null)
@@ -227,8 +267,9 @@ public sealed class MediaService
         _sourceAppId = ReadSourceAppId(chosen);
         if (chosen != null)
         {
+            // PlaybackInfoChanged тут не нужен: за состоянием следит Rewatch,
+            // причём у всех сессий сразу
             chosen.MediaPropertiesChanged += OnMediaPropertiesChanged;
-            chosen.PlaybackInfoChanged += OnPlaybackInfoChanged;
             chosen.TimelinePropertiesChanged += OnTimelineChanged;
         }
 
@@ -244,11 +285,12 @@ public sealed class MediaService
     private void OnMediaPropertiesChanged(GlobalSystemMediaTransportControlsSession sender, MediaPropertiesChangedEventArgs args) =>
         Changed?.Invoke();
 
-    private void OnPlaybackInfoChanged(GlobalSystemMediaTransportControlsSession sender, PlaybackInfoChangedEventArgs args)
+    /// <summary>Состояние сменилось у любой из сессий - выбирать надо заново.
+    /// Показываемая могла доиграть и стать Stopped, а остановленная - наоборот
+    /// заиграть; список сессий при этом не меняется, так что SessionsChanged
+    /// не придёт.</summary>
+    private void OnAnyPlaybackInfoChanged(GlobalSystemMediaTransportControlsSession sender, PlaybackInfoChangedEventArgs args)
     {
-        // Выбранная сессия могла доиграть и стать Stopped - тогда она больше
-        // не годится, и выбирать надо заново. Сам по себе список сессий при
-        // этом не меняется, так что SessionsChanged не придёт
         WinRtThread.Post(PickSession);
         Changed?.Invoke();
     }
