@@ -7,7 +7,10 @@ internal static class Interop
 {
     public const int GWL_EXSTYLE = -20;
     public const int WS_EX_TOOLWINDOW = 0x00000080;
+    public const int WS_EX_APPWINDOW = 0x00040000;
     public const int WS_EX_NOACTIVATE = 0x08000000;
+    public const int GWL_STYLE = -16;
+    public const int WS_CAPTION = 0x00C00000;
 
     public const int SW_RESTORE = 9;
     public const int SW_MINIMIZE = 6;
