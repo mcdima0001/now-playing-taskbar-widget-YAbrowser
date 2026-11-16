@@ -119,6 +119,7 @@ internal static class Interop
     public const uint GW_OWNER = 4;
 
     public const int SW_SHOW = 5;
+    public const int SW_SHOWNOACTIVATE = 4;
 
     public const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
 
@@ -442,6 +443,15 @@ internal static class Interop
             if (pid == ours) return true; // свои окна виджета не в счёт
             if (!IsRealWindow(hwnd)) return true;
             if (IsShellWindow(hwnd)) return true; // панели пропускаем, ищем дальше
+
+            // Служебные оверлеи во весь экран - не приложение. Оверлей NVIDIA
+            // (CEF-OSC-WIDGET) держит невидимое окно 1920x1080 всегда; пока
+            // на экране есть обычные окна, оно лежит под ними и не мешает, но
+            // после Win+D или при мелком окне на пустом столе оказывалось
+            // верхним "большим" - и виджет прятался как от игры. Игры и видео
+            // не бывают окнами-инструментами и не отказываются от активации
+            int ex = GetWindowLong(hwnd, GWL_EXSTYLE);
+            if ((ex & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)) != 0) return true;
             if (MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) != monTray) return true;
             if (!GetWindowRect(hwnd, out RECT wr)) return true;
 

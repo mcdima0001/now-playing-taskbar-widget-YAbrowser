@@ -951,6 +951,14 @@ public partial class MainWindow : Window
 
         if (Visibility != Visibility.Visible)
             Visibility = Visibility.Visible;
+        else if (!Interop.IsWindowVisible(_hwnd))
+        {
+            // Окно спрятали мимо нас: на Windows 11 24H2 «Показать рабочий
+            // стол» (Win+D) и выход из него прячут окна, которыми владеет
+            // панель задач, а возвращают не всегда. WPF при этом считает окно
+            // видимым и сам его не покажет - возвращаем напрямую
+            Interop.ShowWindow(_hwnd, Interop.SW_SHOWNOACTIVATE);
+        }
         ReassertTopmost();
     }
 
