@@ -23,6 +23,18 @@ public class WidgetSettings
     /// area cannot be read.</summary>
     public Dictionary<int, double> ManualGap { get; set; } = new();
 
+    /// <summary>
+    /// Правый край кнопки мини-приложений (погоды), запомненный на каждой
+    /// панели.
+    ///
+    /// Нужен, когда панель перестаёт её отрисовывать: Windows создаёт эту
+    /// кнопку лениво, и до первого открытия её на панели попросту нет. Без
+    /// памяти виджет вставал у самого края и накрывал собой то место, куда
+    /// надо нажать, чтобы кнопка появилась - открыть её становилось нечем.
+    /// С запомненным краем место остаётся свободным.
+    /// </summary>
+    public Dictionary<int, double> WidgetsAnchor { get; set; } = new();
+
     /// <summary>Font for title/artist. Empty = the system one (whatever the XAML
     /// inherits) - stored by name so it survives a settings file copied to
     /// another machine without that font installed.</summary>
@@ -113,6 +125,7 @@ public class WidgetSettings
             if (s.Monitors is null) s.Monitors = new List<int>();
             if (s.ManualX is null) s.ManualX = new Dictionary<int, double>();
             if (s.ManualGap is null) s.ManualGap = new Dictionary<int, double>();
+            if (s.WidgetsAnchor is null) s.WidgetsAnchor = new Dictionary<int, double>();
         }
         catch
         {

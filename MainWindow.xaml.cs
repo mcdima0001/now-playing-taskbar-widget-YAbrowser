@@ -539,6 +539,45 @@ public partial class MainWindow : Window
         return Interop.FindWindow("Shell_TrayWnd", null);
     }
 
+    private DateTime _anchorSavedAt;
+
+    /// <summary>Запомнить правый край кнопки погоды - см.
+    /// <see cref="WidgetSettings.WidgetsAnchor"/>. В памяти обновляется сразу
+    /// (настройки общие на все окна), на диск пишется редко: позиция читается
+    /// пять раз в секунду, а этот край меняется только вместе с текстом
+    /// погоды.</summary>
+    private void RememberWidgetsAnchor(double rightPx)
+    {
+        bool known = _settings.WidgetsAnchor.TryGetValue(TrayIndex, out double old);
+        if (known && Math.Abs(old - rightPx) < 8) return;
+        _settings.WidgetsAnchor[TrayIndex] = rightPx;
+        if (DateTime.UtcNow - _anchorSavedAt < TimeSpan.FromMinutes(5)) return;
+        _anchorSavedAt = DateTime.UtcNow;
+        try { _settings.Save(); } catch { }
+    }
+
+    /// <summary>
+    /// Левый край, когда кнопки погоды сейчас не видно.
+    ///
+    /// Если мы её когда-то видели, её место остаётся свободным. Windows
+    /// отрисовывает эту кнопку лениво - до первого открытия её на панели нет
+    /// вовсе, - а виджет, вставший впритык к краю, накрывал собой то место,
+    /// куда надо нажать, чтобы она появилась: открыть её было нечем.
+    ///
+    /// Запомненное значение может прийти из прошлого сеанса и относиться к
+    /// другой панели, поэтому дальше четверти её ширины не пускаем.
+    /// </summary>
+    private int LeftFallbackPx(Interop.RECT r)
+    {
+        if (_settings.WidgetsAnchor.TryGetValue(TrayIndex, out double remembered))
+        {
+            double limit = r.Left + (r.Right - r.Left) * 0.25;
+            if (remembered > r.Left && remembered < limit)
+                return (int)remembered + 8;
+        }
+        return r.Left + 12;
+    }
+
     private static bool IsTaskbarLeftAligned()
     {
         try
@@ -740,6 +779,7 @@ public partial class MainWindow : Window
             startLeftPx = _startLeftPx;
             taskEndPx = _taskEndPx;
         }
+        if (widgetsRightPx.HasValue) RememberWidgetsAnchor(widgetsRightPx.Value);
 
         // All positioning maths run in PHYSICAL PIXELS of the target bar:
         // converting to DIP used the scale of the window's CURRENT monitor and,
@@ -804,7 +844,7 @@ public partial class MainWindow : Window
                     HideWidget();
                     return;
                 }
-                leftPx = widgetsRightPx.HasValue ? (int)widgetsRightPx.Value + 8 : r.Left + 12;
+                leftPx = widgetsRightPx.HasValue ? (int)widgetsRightPx.Value + 8 : LeftFallbackPx(r);
                 rightLimitPx = r.Right - 4;
             }
             else
@@ -813,7 +853,7 @@ public partial class MainWindow : Window
                 // Centred icons (on any bar/monitor): the free space is on the
                 // left - align right after the widgets/weather button; without
                 // it, at the left edge. Never invade the Start button.
-                leftPx = widgetsRightPx.HasValue ? (int)widgetsRightPx.Value + 8 : r.Left + 12;
+                leftPx = widgetsRightPx.HasValue ? (int)widgetsRightPx.Value + 8 : LeftFallbackPx(r);
                 // Зазор до кнопки Пуск. Он крошечный намеренно: видимое
                 // расстояние создаёт ещё и собственное поле крайней кнопки
                 // виджета (26 DIP против 13 у значка)
@@ -837,7 +877,12 @@ public partial class MainWindow : Window
         if (_spotifyPresent)
         {
             int availPx = rightAnchored ? rightLimitPx - rightAnchorLeftLimitPx : rightLimitPx - leftPx;
-            if (!ApplyResponsiveLayout(availPx / windowScale))
+            // Растягивание имеет смысл только когда известно, ОТ чего тянуть.
+            // Без кнопки погоды левым краем берётся край панели, и плашка
+            // занимала её целиком - именно так и выглядела поломка
+            bool leftAnchorKnown = rightAnchored ? taskEndPx.HasValue : widgetsRightPx.HasValue;
+            if (!ApplyResponsiveLayout(availPx / windowScale, leftAnchorKnown,
+                                       (r.Right - r.Left) / windowScale))
             {
                 // On a crowded bar not even the minimum version fits: hide
                 // instead of overflowing onto the clock/icons (issue #10)
@@ -874,7 +919,8 @@ public partial class MainWindow : Window
         // Hide when: the app is fullscreen (irrelevant under auto-hide - maximized
         // windows cover the whole screen and would give false positives; visibility
         // already follows the bar); or Spotify closed with no launcher button.
-        bool hide = (!Interop.IsAutoHideEnabled() && Interop.IsMonitorCoveredByFullscreen(_hwnd, tray))
+        bool hide = (!TestSwitches.NoFullscreen && !Interop.IsAutoHideEnabled()
+                     && Interop.IsMonitorCoveredByFullscreen(_hwnd, tray))
                     || (!_spotifyPresent && !_settings.ShowLauncher);
         if (hide)
         {
@@ -1143,7 +1189,13 @@ public partial class MainWindow : Window
         }
     }
 
-    private bool ApplyResponsiveLayout(double availableDip)
+    /// <param name="leftAnchorKnown">Левый якорь (кнопка погоды, а на
+    /// лево-выровненной панели - конец ряда значков) действительно найден.
+    /// Без него растягивать нельзя: левым краем становится край самой панели,
+    /// и плашка разъезжается на весь экран.</param>
+    /// <param name="barWidthDip">Ширина панели - по ней берётся потолок
+    /// растягивания.</param>
+    private bool ApplyResponsiveLayout(double availableDip, bool leftAnchorKnown, double barWidthDip)
     {
         double s = _settings.Scale;
         double avail = availableDip / s; // work in pre-scale units
@@ -1197,12 +1249,17 @@ public partial class MainWindow : Window
             // room always wins, so it never overflows a full bar
             text = Math.Min(room, Math.Max(AutoMinTextWidth, natural + _settings.TextPadding));
         }
-        else if (_settings.StretchText)
+        else if (_settings.StretchText && leftAnchorKnown)
         {
             // Растянуть до правого предела (кнопка Пуск / область уведомлений):
             // room ограничен MaxTextWidth, и из-за него между виджетом и Пуском
-            // оставалась пустая полоса
-            text = Math.Max(MinTextWidth, MinTextWidth + (avail - used));
+            // оставалась пустая полоса.
+            //
+            // Но не шире половины панели. Потолок нужен на случай, когда якорь
+            // formально есть, а значение у него негодное: плашка "сейчас
+            // играет" шире половины бара не нужна никогда.
+            double cap = Math.Max(MaxTextWidth, barWidthDip / s / 2);
+            text = Math.Max(MinTextWidth, Math.Min(MinTextWidth + (avail - used), cap));
         }
         else
         {
@@ -1256,6 +1313,7 @@ public partial class MainWindow : Window
 
     private void RefreshAnchors(IntPtr tray)
     {
+        if (TestSwitches.NoUia) return;
         // Дешёвый опрос (погода + Пуск) можно гонять часто - именно он отвечает
         // за то, как быстро виджет реагирует на смену ширины соседей. Полный,
         // с обходом всех кнопок панели, нужен только правой привязке

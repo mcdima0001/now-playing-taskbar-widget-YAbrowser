@@ -98,8 +98,8 @@ public sealed class MediaHub
         _browser.Changed += () => Changed?.Invoke();
         _browser.TimelineChanged += () => TimelineChanged?.Invoke();
         _browser.FocusReady += OnBrowserFocused;
-        _browser.Start();
-        await _smtc.InitializeAsync();
+        if (!TestSwitches.NoBridge) _browser.Start();
+        if (!TestSwitches.NoSmtc) await _smtc.InitializeAsync();
     }
 
     public void Shutdown()

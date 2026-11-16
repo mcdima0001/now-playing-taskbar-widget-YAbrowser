@@ -26,6 +26,7 @@ public partial class App : Application
         // ушёл. Без неё исчезнувший процесс не отличить от никогда не
         // запускавшегося - на это уже потратили полдня
         Diag.Log($"Started, version {System.Reflection.Assembly.GetExecutingAssembly().GetName().Version}.");
+        TestSwitches.LogActive();
 
         // The window can be destroyed by an Explorer restart (it is owned by
         // the taskbar) and recreated - the app only exits when the user says so
